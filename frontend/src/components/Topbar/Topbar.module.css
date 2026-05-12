@@ -1,0 +1,99 @@
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 20px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  height: 56px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.2px;
+}
+.brandMark {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background:
+    radial-gradient(circle at 30% 30%, #b388ff 0%, var(--accent) 60%, #4c1d95 100%);
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.35);
+}
+
+.promptGroup {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 720px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px;
+  height: 36px;
+}
+.promptLabel {
+  font-size: 11px;
+  color: var(--fg-1);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.promptInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg-0);
+  font-size: 14px;
+}
+.promptInput::placeholder {
+  color: #555562;
+}
+
+.generateBtn {
+  background: var(--accent);
+  border: none;
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.generateBtn:hover:not(:disabled) {
+  background: #9d6ef9;
+}
+.generateBtn:disabled {
+  background: #3a3548;
+  color: #75707f;
+  cursor: not-allowed;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.error {
+  color: #ff7676;
+  font-size: 12px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phaseChip {
+  font-size: 11px;
+  color: var(--fg-1);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  border-radius: 999px;
+}

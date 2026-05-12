@@ -1,0 +1,96 @@
+.gridWrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+  max-width: 640px;
+  width: 100%;
+}
+
+.tile {
+  position: relative;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  aspect-ratio: 1 / 1;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.tile:hover {
+  border-color: var(--accent-soft);
+  transform: translateY(-1px);
+}
+.tileActive {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.4);
+}
+
+.tile[data-skeleton] {
+  background: linear-gradient(
+    100deg,
+    var(--bg-2) 0%,
+    var(--bg-3) 50%,
+    var(--bg-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite linear;
+  cursor: default;
+}
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.tileImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tileLabel {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.55);
+  color: white;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--fg-1);
+  text-align: center;
+  width: 100%;
+  height: 100%;
+  padding: 32px;
+}
+.emptyMark {
+  font-size: 32px;
+  color: var(--accent);
+  opacity: 0.7;
+  margin-bottom: 4px;
+}
+.emptyHint {
+  font-size: 13px;
+  opacity: 0.7;
+}
