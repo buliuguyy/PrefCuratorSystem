@@ -1,10 +1,14 @@
+import { mockApi } from "@/lib/mockApi";
 import type {
   AssetRef,
   ComposeResponse,
   Dimension,
   FusionStack,
+  GeneratedAsset,
   TagResult,
 } from "@/types";
+
+const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_API === "1";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -24,56 +28,46 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const api = {
+const realApi = {
   base: API_BASE,
-
-  assetUrl(id: string): string {
-    return `${API_BASE}/api/assets/${id}`;
-  },
-
-  async health(): Promise<{ status: string; phase: string }> {
-    return jsonFetch("/health");
-  },
-
-  async generateCandidates(
-    prompt: string,
-    n: number = 4,
-  ): Promise<{ candidates: AssetRef[] }> {
-    return jsonFetch("/api/candidates", {
+  assetUrl: (id: string) => `${API_BASE}/api/assets/${id}`,
+  health: () => jsonFetch<{ status: string; phase: string }>("/health"),
+  generateCandidates: (prompt: string, n: number = 4) =>
+    // Real backend still returns minimal AssetRef[] — the store backfills the
+    // remaining GeneratedAsset fields (origin, createdAt, prompt, generator).
+    jsonFetch<{ candidates: (AssetRef | GeneratedAsset)[] }>("/api/candidates", {
       method: "POST",
       body: JSON.stringify({ prompt, n }),
-    });
-  },
-
-  async smartTag(
-    assetId: string,
-    dimensions: Dimension[],
-  ): Promise<TagResult> {
-    return jsonFetch("/api/tagging/smart-tag", {
+    }),
+  smartTag: (assetId: string, dimensions: Dimension[]) =>
+    jsonFetch<TagResult>("/api/tagging/smart-tag", {
       method: "POST",
       body: JSON.stringify({ asset_id: assetId, dimensions }),
-    });
-  },
-
-  async lasso(
+    }),
+  lasso: (
     assetId: string,
     polygon: [number, number][],
     dimensions: Dimension[],
-  ): Promise<{ cropped_asset_id: string; tags: Record<Dimension, string[]> }> {
-    return jsonFetch("/api/tagging/lasso", {
-      method: "POST",
-      body: JSON.stringify({
-        asset_id: assetId,
-        polygon,
-        dimensions,
-      }),
-    });
-  },
-
-  async compose(stack: FusionStack): Promise<ComposeResponse> {
-    return jsonFetch("/api/compose", {
+  ) =>
+    jsonFetch<{ cropped_asset_id: string; tags: Record<Dimension, string[]> }>(
+      "/api/tagging/lasso",
+      {
+        method: "POST",
+        body: JSON.stringify({ asset_id: assetId, polygon, dimensions }),
+      },
+    ),
+  compose: (stack: FusionStack) =>
+    jsonFetch<ComposeResponse>("/api/compose", {
       method: "POST",
       body: JSON.stringify(stack),
-    });
-  },
+    }),
 };
+
+/**
+ * Single api surface. Resolves at module-load based on
+ * NEXT_PUBLIC_USE_MOCK_API. Components import { api } and don't know or care
+ * which backend they're talking to.
+ */
+export const api: typeof realApi = USE_MOCK ? mockApi : realApi;
+
+export const API_MODE: "mock" | "real" = USE_MOCK ? "mock" : "real";

@@ -1,0 +1,215 @@
+.wrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 32px;
+  gap: 14px;
+  overflow: auto;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: none;
+  flex: 1;
+  text-align: center;
+  color: var(--fg-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.countChip {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-0);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+.backBtn,
+.recomposeBtn {
+  font-size: 12.5px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+/* Invisible block that mirrors the back button width so the title stays
+   centered after we removed the right-side Recompose button. */
+.headRightSpacer {
+  width: 150px;
+  height: 1px;
+}
+
+.backBtn {
+  background: transparent;
+  color: var(--fg-1);
+  border: 1px solid var(--border);
+}
+.backBtn:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+.recomposeBtn {
+  background: var(--accent);
+  color: white;
+  border: none;
+  font-weight: 600;
+}
+.recomposeBtn:hover:not(:disabled) {
+  background: #9d6ef9;
+}
+.recomposeBtn:disabled {
+  background: #3a3548;
+  color: #75707f;
+  cursor: not-allowed;
+}
+
+.mockBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(245, 164, 93, 0.10);
+  border: 1px solid rgba(245, 164, 93, 0.35);
+  color: #f5d29c;
+  font-size: 12.5px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+.mockBanner code {
+  background: rgba(0,0,0,0.4);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11.5px;
+}
+.mockDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f5a45d;
+  box-shadow: 0 0 8px rgba(245, 164, 93, 0.6);
+  flex-shrink: 0;
+}
+
+.canvasWrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  min-height: 0;
+}
+
+.canvasImg {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  box-shadow: 0 10px 36px rgba(0,0,0,0.5);
+}
+
+.composingOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 13, 18, 0.78);
+  backdrop-filter: blur(2px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-1);
+  font-size: 13px;
+  border-radius: 12px;
+  z-index: 5;
+}
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.foot {
+  text-align: center;
+}
+.hint {
+  font-size: 11.5px;
+  color: var(--fg-1);
+  opacity: 0.8;
+}
+.hint em {
+  font-style: normal;
+  color: var(--fg-0);
+}
+
+.thumbStrip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.thumbBtn {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0;
+  background: var(--bg-2);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.12s, transform 0.12s;
+}
+.thumbBtn:hover {
+  border-color: var(--accent-soft);
+}
+.thumbBtnActive {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.45);
+}
+.thumbImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.thumbLabel {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

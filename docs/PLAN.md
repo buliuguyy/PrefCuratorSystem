@@ -1,118 +1,100 @@
 # PrefCurator — Phase Plan
 
-Living document. Each phase is independently demoable; phase boundaries are
-the natural commit/push points (see [commit policy in memory]).
+Living document. Updated as decisions evolve.
 
-## ✅ Phase 0 — scaffold
+## Working strategy
 
-Repo skeleton, dev servers boot, `/health` end-to-end.
-**Commit:** `2b50d3b`
+**Frontend-first, mock-first.** All UI flows are wired end-to-end using a
+client-side mock API (`frontend/src/lib/mockApi.ts`) — no backend calls
+during UI iteration. Once every panel and interaction is locked, we swap in
+real backend algorithms one at a time.
 
-## ✅ Phase 1 — backend service clients + routes (all mock)
+The toggle is `NEXT_PUBLIC_USE_MOCK_API=1` in `frontend/.env.local`. Setting
+it to `0` (or removing it) makes `api.ts` hit the FastAPI backend instead.
 
-- `image_gen_client` (mock 4 PNGs), `vlm_tagger_client` (hardcoded tags),
-  `ip_composer_client` (real multipart + mock fallback when 12100 down)
-- Routes: `/api/candidates`, `/api/assets/{upload,id}`, `/api/tagging/{smart-tag,lasso}`, `/api/compose`
-- `pytest tests/test_compose_smoke.py` ✓
+## Phase ledger
 
-**Commit:** `bef2a18`
+### ✅ Phase 0 — scaffold
+Repo skeleton + dev servers boot. Commit `2b50d3b`.
 
-## ✅ Phase 2 — frontend Inspiration Grid + Smart Tag popover
+### ✅ Phase 1 — backend service clients + routes (all mock)
+`image_gen_client` / `vlm_tagger_client` / `ip_composer_client` + 5 routes +
+pytest smoke. Commit `bef2a18`.
 
-- `Topbar` (prompt + Generate), `InspirationGrid` (4 tiles), `SmartTagPopover`
-  (per-dimension chips + tag pills), `FusionStackPreview` (right panel)
-- zustand store with curated-concept list, `toFusionStack()` serializer
-- CORS widened to allow 127.0.0.1:3000
+### ✅ Phase 2 — Inspiration Grid + Smart Tag popover (frontend)
+`Topbar`, `InspirationGrid`, `SmartTagPopover`, `FusionStackPreview`,
+zustand store with `toFusionStack()`. Commit `d57a5e6`.
 
-**Commit:** `d57a5e6`
+### ✅ Phase 2.5 — per-tag selection refinement
+Each individual tag is independently like/dislike-able (not the whole
+dimension row). Backend mock candidates use the user's 4 real placeholder
+images. Commit `1156771`.
 
-## ⏳ Phase 2.5 — interaction refinements (current)
+### 🚧 Phase 3 — Compose pipeline (mock-only frontend)
+- `Compose` button in Fusion Stack panel header
+- `ResultCanvas` swap-view (back / recompose)
+- `IntensityMixer` panel appears at the bottom **after first compose**
+  (folding the previously-planned Phase 5 panel into this phase per
+  user spec)
+- Mock-fallback banner kept (also useful when real backend is wired)
+- **No real backend calls in this phase** — `mockApi.ts` returns a
+  client-rendered composite image (canvas with slot overlay) so the UI
+  flow is fully demoable offline
 
-- **Per-tag selection** in Smart Tagging — every tag is independently
-  like/dislike-able; designers can pick "warm" from Color without taking
-  "glowing" and "amber".
-- Backend mock candidates use real placeholder images uploaded by the user
-  to `frontend/temporary_assets/`.
-- Update Fusion Stack panel to render the selected-tag subset, not the whole
-  dimension's tag list.
+### Phase 4 — Lasso (react-konva)
+- Toggle "Lasso mode" per image tile (or right-click)
+- Free-draw polygon → captured to backend `/api/tagging/lasso`
+- Cropped sub-image becomes its own asset in the Fusion Stack; tagging
+  popover scopes to that ROI
+- Per the screenshot: callouts like "Golden Dome", "Lasso'd Clouds"
+  pointing into the image with dashed selection line
 
-## Phase 3 — Feature Fusion Stack ↔ Compose
+### Phase 5 — Intensity sliders → real recompose
+- Slider drag (debounced 200ms) → recompose with adjusted alphas
+- Same `seed` preserves overall composition
+- "Mixer Group" lock UI: select multiple sliders → drag in unison
+  (preserve ratios), per the screenshot's `Locked` chip
+- Until backend is wired, slider changes only update the mock composite
+  visually
 
-Goal: clicking a single button turns the curated stack into a real composed
-image via IP-Composer.
+### Phase 6 — Persona panel + real backend algorithms
+- Left sidebar `PersonaPanel`: "Idiosyncratic Preferences" with persona
+  cards (name + tag flat-list, color-coded by dimension)
+- "Save as Persona" / "Update Persona" / "Load Persona"
+- "Asset Library" panel (also left sidebar)
+- "The Curator Panel" right sidebar w/ Version History + Final Composition
+- Backend algorithm wire-up (one at a time):
+  1. **ImageTagging** (VLM, currently mocked in `vlm_tagger_client`):
+     upload image → structured JSON of feature words per dimension.
+     Real impl uses GPT-5.4 via OPENAI_BASE_URL.
+  2. **IP-Composer integration**: forward fusion stack to localhost:12100;
+     debug CORS error path (currently FastAPI 500 on compose path masks as
+     CORS — the middleware doesn't add headers when an unhandled exception
+     short-circuits the response. Need to add a global exception handler
+     that wraps errors into 4xx/5xx with CORS headers preserved.)
+  3. **TextToImage** for initial candidates (currently mocked with the 4
+     user-uploaded placeholders). Provider TBD.
 
-- Promote `FusionStackPreview` into a proper `FeatureFusionStack` panel
-  styled per the screenshot ("Curator Tiles" with image thumbnails, expanded
-  dimension labels, strike-through for negative groups)
-- Add **Compose** button at the top (or in Topbar next to Generate)
-- On click: `useCurator.toFusionStack()` → `api.compose(stack)` → display
-  result in a new central "Result Canvas" view (toggle between candidate grid
-  and result canvas)
-- Show `used_mock=true` banner clearly when IP-Composer was unreachable
-- Edit case: re-clicking Compose with modified stack just replaces the result
-- **Acceptance**: with `localhost:12100` running, the result image is a real
-  IP-Composer output. With it offline, the user sees a "MOCK COMPOSITE" with
-  a yellow banner.
+## Outstanding design decisions (track here)
 
-## Phase 4 — Lasso (react-konva)
+- [ ] How does "Asset Library" relate to candidates? Are dropped/uploaded
+  images allowed in the library independent of the prompt-generated grid?
+- [ ] Lasso ROI tagging: should it open a Smart Tag popover scoped to JUST
+  Subject / Texture / Composition (vs. the full 5 dimensions)? The
+  screenshot only shows Subject + Texture.
+- [ ] Mixer Group "Locked" semantics: what's the unlocked default? Each
+  slider independent, or all sliders move together by default?
+- [ ] Persona schema: persistent UUIDs vs. user-given names? Versioning?
 
-Goal: select a sub-region of any image (candidate or result) and tag just
-that ROI.
+## Naming map (screenshot terminology → code)
 
-- Replace the static `<img>` tile with a react-konva Stage when the user
-  enters "Lasso mode" (toggle button per tile, or shift+click to enter)
-- Free-draw polygon via mousedown→mousemove→mouseup; render as semi-transparent
-  filled `Line` with `closed=true`
-- On polygon close: collect points (in image coords, account for scaling)
-  → POST `/api/tagging/lasso` with `{asset_id, polygon, dimensions}`
-- Backend already crops + neutral-gray fills + sends to VLM mock → returns
-  `cropped_asset_id` + tags
-- The returned cropped image enters the Fusion Stack as a new asset (the
-  "uuid-D-lasso-1" pattern in the protocol). Its tags appear in a
-  SmartTagPopover variant scoped to that ROI.
-- **Acceptance**: user can draw a lasso on Image_D's dome, tag it as
-  "Subject: cloud formations", and have it appear as a separate group in
-  the Fusion Stack with the cropped thumbnail.
-
-## Phase 5 — Intensity Mixer (sliders)
-
-Goal: after a result is composed, the designer can tweak each slot's alpha
-without re-tagging.
-
-- Bottom panel `IntensityMixer`, one slider per concept in the stack
-  (range −1 to +1, default ±1 based on sign)
-- Drag → debounced (~200ms) re-call of `/api/compose` with the same stack
-  but modified alphas — IMPORTANT: keep the same seed so global composition
-  is stable
-- "Mixer Group" lock UI: select multiple sliders → they drag in unison
-  (preserve ratios). Matches the "Locked" chip in the screenshot.
-- Show before/after thumbnails next to the slider rail (Screenshot's design)
-- **Acceptance**: composing → drag Style slider from 1.0 down to 0.3 → result
-  refreshes with the same composition but weaker Style influence.
-
-## Phase 6 — Persona panel + real VLM + real image-gen
-
-Goal: persistent design "personas" so a designer's preferences carry across
-sessions.
-
-- Left sidebar `PersonaPanel`: shows current persona name + a flat tag
-  cloud of all curated concepts (color-coded by dimension)
-- **Save as Persona** button: writes `{name, fusionStack, finalImageId,
-  timestamp}` to `backend/storage/personas/<slug>.json`
-- **Load Persona** dropdown: restores stack + base asset state
-- Replace `vlm_tagger_client` mock with real GPT-5.4 call (image → structured
-  JSON per dimension). Use a system prompt that enforces strict JSON output.
-  Honor `OPENAI_BASE_URL` from `.env`.
-- Replace `image_gen_client` mock with whatever real service the user
-  designates (decision deferred).
-- **Acceptance**: open the app fresh, load "Spooky & Ethereal" persona, the
-  same fusion stack + asset references re-hydrate and re-composing reproduces
-  a similar result.
-
-## Future / nice-to-have (out of scope for v1)
-
-- Multi-user / auth
-- History timeline of composed results
-- Export pipeline (PNG, JSON of full stack)
-- Mobile / touch ergonomics
-- Real-time collab (multiplayer cursors)
+- "Idiosyncratic Preferences" → left-sidebar `PersonaPanel` (Phase 6)
+- "Asset Library" → bottom of `PersonaPanel` (Phase 6)
+- "Smart Tagging" → `SmartTagPopover` (Phase 2)
+- "Feature Fusion Stack" / "Curator Tiles" → `FusionStackPreview` (Phase 2,
+  to be promoted to `FeatureFusionStack` panel in Phase 3 with the
+  "Result image = A_features + D_Lasso − B_style" formula header)
+- "Feature Intensity Mixer" → `IntensityMixer` (Phase 3 mocked / Phase 5
+  real)
+- "The Curator Panel" with "Version History" / "Final Composition" → Phase 6
+- "Save as Persona" / "Update Persona" → Phase 6

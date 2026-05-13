@@ -1,8 +1,5 @@
 "use client";
 
-import { useState } from "react";
-
-import { api } from "@/lib/api";
 import { useCurator } from "@/store/useCurator";
 
 import styles from "./Topbar.module.css";
@@ -10,25 +7,9 @@ import styles from "./Topbar.module.css";
 export function Topbar() {
   const prompt = useCurator((s) => s.prompt);
   const setPrompt = useCurator((s) => s.setPrompt);
-  const setCandidates = useCurator((s) => s.setCandidates);
-  const setLoadingCandidates = useCurator((s) => s.setLoadingCandidates);
+  const generate = useCurator((s) => s.generate);
   const loading = useCurator((s) => s.loadingCandidates);
-
-  const [error, setError] = useState<string | null>(null);
-
-  async function onGenerate() {
-    if (!prompt.trim()) return;
-    setError(null);
-    setLoadingCandidates(true);
-    try {
-      const res = await api.generateCandidates(prompt.trim(), 4);
-      setCandidates(res.candidates);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoadingCandidates(false);
-    }
-  }
+  const composeError = useCurator((s) => s.composeError);
 
   return (
     <header className={styles.topbar}>
@@ -46,12 +27,12 @@ export function Topbar() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !loading) onGenerate();
+            if (e.key === "Enter" && !loading) generate();
           }}
         />
         <button
           className={styles.generateBtn}
-          onClick={onGenerate}
+          onClick={() => generate()}
           disabled={loading || !prompt.trim()}
         >
           {loading ? "Generating…" : "Generate"}
@@ -59,8 +40,8 @@ export function Topbar() {
       </div>
 
       <div className={styles.right}>
-        {error && <span className={styles.error}>{error}</span>}
-        <span className={styles.phaseChip}>phase 2</span>
+        {composeError && <span className={styles.error}>{composeError}</span>}
+        <span className={styles.phaseChip}>phase 3.7</span>
       </div>
     </header>
   );

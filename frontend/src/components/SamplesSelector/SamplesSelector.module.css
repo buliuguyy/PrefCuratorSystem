@@ -1,0 +1,43 @@
+.group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 3px 6px 3px 8px;
+}
+.label {
+  font-size: 10px;
+  color: var(--fg-1);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  margin-right: 4px;
+}
+.btn {
+  background: transparent;
+  border: none;
+  color: var(--fg-1);
+  font-size: 12px;
+  width: 22px;
+  height: 26px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.btn:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btnOn {
+  background: var(--accent);
+  color: white;
+}
+.btnOn:hover:not(:disabled) {
+  background: #9d6ef9;
+  color: white;
+}

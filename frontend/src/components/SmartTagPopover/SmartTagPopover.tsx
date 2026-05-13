@@ -24,16 +24,15 @@ function signFromEvent(e: React.MouseEvent): Sign {
 }
 
 export function SmartTagPopover({ assetId, onClose }: Props) {
-  const tagCache = useCurator((s) => s.tagCache);
-  const setTagsForAsset = useCurator((s) => s.setTagsForAsset);
+  const asset = useCurator((s) => s.assets[assetId]);
+  const setAssetTags = useCurator((s) => s.setAssetTags);
   const toggleTag = useCurator((s) => s.toggleTag);
   const tagState = useCurator((s) => s.tagState);
-  // subscribe to stack length so this component re-renders on selection changes
-  // (tagState reads a fresh snapshot via get(), so we need an explicit trigger)
+  // re-render on stack changes so selected pill states update
   useCurator((s) => s.stack);
 
-  const cached = tagCache[assetId];
-  const [data, setData] = useState<TagResult | null>(cached ?? null);
+  const cached = asset?.tags ?? null;
+  const [data, setData] = useState<TagResult | null>(cached);
   const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +48,7 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
       .then((r) => {
         if (cancelled) return;
         setData(r);
-        setTagsForAsset(assetId, r);
+        setAssetTags(assetId, r);
       })
       .catch((e) => !cancelled && setError(String(e)))
       .finally(() => !cancelled && setLoading(false));
@@ -78,7 +77,19 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
       <div className={styles.backdrop} onClick={onClose} />
       <div className={styles.popover} onClick={(e) => e.stopPropagation()}>
         <header className={styles.head}>
-          <span className={styles.title}>Smart Tagging</span>
+          <span className={styles.title}>
+            Smart Tagging
+            {asset && (
+              <span
+                className={`${styles.assetChip} ${
+                  asset.origin === "composed" ? styles.assetChipComposed : ""
+                }`}
+              >
+                {asset.origin === "composed" ? "✦ " : ""}
+                {asset.label}
+              </span>
+            )}
+          </span>
           <span className={styles.subtitle}>
             click a tag to <em>like</em> · ⌘/Ctrl-click to <em>dislike</em>
           </span>

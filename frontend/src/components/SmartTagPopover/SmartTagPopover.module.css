@@ -33,6 +33,24 @@
 .title {
   font-size: 14px;
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.assetChip {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-0);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.2px;
+}
+.assetChipComposed {
+  background: rgba(139, 92, 246, 0.18);
+  color: #c4b5fd;
+  border-color: rgba(139, 92, 246, 0.45);
 }
 .subtitle {
   font-size: 11px;
