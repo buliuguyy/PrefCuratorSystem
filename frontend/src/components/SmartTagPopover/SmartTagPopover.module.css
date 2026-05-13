@@ -96,8 +96,15 @@
 
 .dimRow {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
 }
 
 .dimChip {
@@ -112,40 +119,41 @@
   color: white;
   text-align: center;
   flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .pill {
-  flex: 1;
   background: var(--bg-3);
   border: 1px solid var(--border);
   color: var(--fg-0);
   font-size: 12.5px;
-  padding: 6px 12px;
+  padding: 5px 12px;
   border-radius: 999px;
   cursor: pointer;
-  text-align: left;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  transition: background 0.12s, border-color 0.12s;
+  gap: 6px;
+  transition: background 0.12s, border-color 0.12s, transform 0.12s;
 }
 .pill:hover {
   border-color: var(--accent-soft);
 }
+.pill:active {
+  transform: scale(0.96);
+}
 .pillText {
-  flex: 1;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .pillPlus {
-  background: rgba(123, 216, 143, 0.12);
-  border-color: rgba(123, 216, 143, 0.55);
+  background: rgba(123, 216, 143, 0.14);
+  border-color: rgba(123, 216, 143, 0.6);
+  color: #d6f6dd;
 }
 .pillMinus {
-  background: rgba(239, 93, 111, 0.12);
-  border-color: rgba(239, 93, 111, 0.6);
+  background: rgba(239, 93, 111, 0.14);
+  border-color: rgba(239, 93, 111, 0.65);
+  color: #ffd6dc;
 }
 
 .markPlus,
@@ -153,10 +161,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
   color: #0f1d12;
   flex-shrink: 0;

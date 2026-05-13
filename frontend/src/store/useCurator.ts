@@ -11,9 +11,13 @@ import type {
   TagResult,
 } from "@/types";
 
-/** One curated concept the designer picked from a specific asset. */
+/**
+ * One curated entry in the stack. Always grouped per (asset, dimension, sign);
+ * its `tags` array holds only the individual tags the designer ticked under
+ * that sign — not the whole dimension's suggestion list.
+ */
 export interface CuratedConcept {
-  /** Stable id for ordering / dedupe (assetId + dimension + sign). */
+  /** Stable id for ordering / dedupe: `${assetId}|${dimension}|${sign}`. */
   key: string;
   assetId: string;
   dimension: Dimension;
@@ -27,10 +31,7 @@ interface CuratorState {
   candidates: AssetRef[];
   loadingCandidates: boolean;
 
-  /** Per-asset cache of smart-tag results so re-opening the popover is free. */
   tagCache: Record<string, TagResult>;
-
-  /** Flat list of curated concepts; serialized into a FusionStack on compose. */
   stack: CuratedConcept[];
 
   // ─── mutations ──────────────────────────────────────────────────────────
@@ -38,17 +39,37 @@ interface CuratorState {
   setCandidates(c: AssetRef[]): void;
   setLoadingCandidates(b: boolean): void;
   setTagsForAsset(assetId: string, result: TagResult): void;
-  toggleConcept(
+
+  /**
+   * Toggle a single tag (one of the suggestion strings) for a given asset+
+   * dimension under the requested sign.
+   *
+   * Rules (the same tag for the same asset+dimension):
+   *   neutral  + click("+")     -> add to "+" group
+   *   neutral  + click("-")     -> add to "-" group
+   *   liked    + click("+")     -> remove (toggle off)
+   *   liked    + click("-")     -> move from "+" to "-"
+   *   disliked + click("+")     -> move from "-" to "+"
+   *   disliked + click("-")     -> remove (toggle off)
+   * The empty group is pruned automatically.
+   */
+  toggleTag(
     assetId: string,
     dimension: Dimension,
-    tags: string[],
+    tag: string,
     sign: Sign,
   ): void;
+
+  /** Returns "+" / "-" / null for the current state of this tag. */
+  tagState(
+    assetId: string,
+    dimension: Dimension,
+    tag: string,
+  ): Sign | null;
+
   removeConcept(key: string): void;
   clearStack(): void;
 
-  // ─── derived ────────────────────────────────────────────────────────────
-  /** Group the flat stack by (assetId, sign) for sending to the backend. */
   toFusionStack(seed?: number): FusionStack | null;
 }
 
@@ -58,6 +79,34 @@ function conceptKey(
   sign: Sign,
 ): string {
   return `${assetId}|${dimension}|${sign}`;
+}
+
+function withTagAdded(
+  stack: CuratedConcept[],
+  assetId: string,
+  dimension: Dimension,
+  tag: string,
+  sign: Sign,
+): CuratedConcept[] {
+  const key = conceptKey(assetId, dimension, sign);
+  const existing = stack.find((c) => c.key === key);
+  if (existing) {
+    if (existing.tags.includes(tag)) return stack;
+    return stack.map((c) =>
+      c.key === key ? { ...c, tags: [...c.tags, tag] } : c,
+    );
+  }
+  return [
+    ...stack,
+    {
+      key,
+      assetId,
+      dimension,
+      tags: [tag],
+      sign,
+      alpha: 1.0,
+    },
+  ];
 }
 
 export const useCurator = create<CuratorState>((set, get) => ({
@@ -74,42 +123,39 @@ export const useCurator = create<CuratorState>((set, get) => ({
   setTagsForAsset: (assetId, result) =>
     set((s) => ({ tagCache: { ...s.tagCache, [assetId]: result } })),
 
-  toggleConcept: (assetId, dimension, tags, sign) =>
-    set((s) => {
-      const key = conceptKey(assetId, dimension, sign);
-      const existing = s.stack.find((c) => c.key === key);
-
-      if (existing) {
-        // Same dimension+sign already selected → toggle off if tags identical,
-        // otherwise overwrite tags.
-        const sameTags =
-          existing.tags.length === tags.length &&
-          existing.tags.every((t, i) => t === tags[i]);
-        if (sameTags) {
-          return { stack: s.stack.filter((c) => c.key !== key) };
-        }
-        return {
-          stack: s.stack.map((c) => (c.key === key ? { ...c, tags } : c)),
-        };
+  tagState: (assetId, dimension, tag) => {
+    const { stack } = get();
+    for (const c of stack) {
+      if (c.assetId === assetId && c.dimension === dimension && c.tags.includes(tag)) {
+        return c.sign;
       }
+    }
+    return null;
+  },
 
-      // Also remove the opposite-sign version (can't be +Style and −Style at once).
-      const opposite = conceptKey(
-        assetId,
-        dimension,
-        sign === "+" ? "-" : "+",
-      );
-      const cleaned = s.stack.filter((c) => c.key !== opposite);
+  toggleTag: (assetId, dimension, tag, sign) =>
+    set((s) => {
+      const targetKey = conceptKey(assetId, dimension, sign);
+      const otherKey = conceptKey(assetId, dimension, sign === "+" ? "-" : "+");
 
-      const concept: CuratedConcept = {
-        key,
-        assetId,
-        dimension,
-        tags,
-        sign,
-        alpha: 1.0,
-      };
-      return { stack: [...cleaned, concept] };
+      const prevInTarget =
+        s.stack.find((c) => c.key === targetKey)?.tags.includes(tag) ?? false;
+
+      // Strip this tag from both possible groups first (prune empty groups).
+      let next = s.stack
+        .map((c) =>
+          c.key === targetKey || c.key === otherKey
+            ? { ...c, tags: c.tags.filter((t) => t !== tag) }
+            : c,
+        )
+        .filter((c) => c.tags.length > 0);
+
+      // If it WASN'T in target before this click, we should ADD it.
+      // If it WAS in target, the click toggles it off (already stripped above).
+      if (!prevInTarget) {
+        next = withTagAdded(next, assetId, dimension, tag, sign);
+      }
+      return { stack: next };
     }),
 
   removeConcept: (key) =>
@@ -121,7 +167,6 @@ export const useCurator = create<CuratorState>((set, get) => ({
     const { stack, candidates } = get();
     if (stack.length === 0) return null;
 
-    // Group concepts by (assetId, sign).
     type Key = string;
     const groups: Record<Key, Group> = {};
     for (const c of stack) {
@@ -137,7 +182,6 @@ export const useCurator = create<CuratorState>((set, get) => ({
       });
     }
 
-    // Base = the asset with the most positive concepts, falling back to first candidate.
     const positiveCounts: Record<string, number> = {};
     for (const c of stack) {
       if (c.sign === "+") {

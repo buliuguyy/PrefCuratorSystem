@@ -8,6 +8,7 @@ import {
   ALL_DIMENSIONS,
   DIMENSION_COLOR,
   type Dimension,
+  type Sign,
   type TagResult,
 } from "@/types";
 
@@ -18,16 +19,18 @@ interface Props {
   onClose(): void;
 }
 
-/** Decide what sign a click event represents (cmd / ctrl = negative). */
-function signFromEvent(e: React.MouseEvent): "+" | "-" {
+function signFromEvent(e: React.MouseEvent): Sign {
   return e.metaKey || e.ctrlKey ? "-" : "+";
 }
 
 export function SmartTagPopover({ assetId, onClose }: Props) {
   const tagCache = useCurator((s) => s.tagCache);
   const setTagsForAsset = useCurator((s) => s.setTagsForAsset);
-  const stack = useCurator((s) => s.stack);
-  const toggleConcept = useCurator((s) => s.toggleConcept);
+  const toggleTag = useCurator((s) => s.toggleTag);
+  const tagState = useCurator((s) => s.tagState);
+  // subscribe to stack length so this component re-renders on selection changes
+  // (tagState reads a fresh snapshot via get(), so we need an explicit trigger)
+  useCurator((s) => s.stack);
 
   const cached = tagCache[assetId];
   const [data, setData] = useState<TagResult | null>(cached ?? null);
@@ -56,7 +59,6 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assetId]);
 
-  // ESC to close
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -65,29 +67,10 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
 
-  function isSelected(
-    dim: Dimension,
-    sign: "+" | "-",
-    tags: string[],
-  ): boolean {
-    return stack.some(
-      (c) =>
-        c.assetId === assetId &&
-        c.dimension === dim &&
-        c.sign === sign &&
-        c.tags.length === tags.length &&
-        c.tags.every((t, i) => t === tags[i]),
-    );
-  }
-
-  function onPillClick(
-    e: React.MouseEvent,
-    dim: Dimension,
-    tags: string[],
-  ) {
+  function onTagClick(e: React.MouseEvent, dim: Dimension, tag: string) {
     e.preventDefault();
     e.stopPropagation();
-    toggleConcept(assetId, dim, tags, signFromEvent(e));
+    toggleTag(assetId, dim, tag, signFromEvent(e));
   }
 
   return (
@@ -97,7 +80,7 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
         <header className={styles.head}>
           <span className={styles.title}>Smart Tagging</span>
           <span className={styles.subtitle}>
-            click to <em>like</em> · ⌘/Ctrl+click to <em>dislike</em>
+            click a tag to <em>like</em> · ⌘/Ctrl-click to <em>dislike</em>
           </span>
           <button
             className={styles.close}
@@ -123,8 +106,6 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
               const tags = data.tags[dim] ?? [];
               if (tags.length === 0) return null;
               const accent = DIMENSION_COLOR[dim];
-              const selPlus = isSelected(dim, "+", tags);
-              const selMinus = isSelected(dim, "-", tags);
               return (
                 <li key={dim} className={styles.dimRow}>
                   <span
@@ -133,27 +114,33 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
                   >
                     {dim}
                   </span>
-                  <button
-                    className={[
-                      styles.pill,
-                      selPlus ? styles.pillPlus : "",
-                      selMinus ? styles.pillMinus : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    style={
-                      selPlus
-                        ? ({
-                            "--accent": accent,
-                          } as React.CSSProperties)
-                        : undefined
-                    }
-                    onClick={(e) => onPillClick(e, dim, tags)}
-                  >
-                    {selPlus && <span className={styles.markPlus}>✓</span>}
-                    {selMinus && <span className={styles.markMinus}>✕</span>}
-                    <span className={styles.pillText}>{tags.join(", ")}</span>
-                  </button>
+                  <div className={styles.pills}>
+                    {tags.map((tag) => {
+                      const state = tagState(assetId, dim, tag);
+                      const cls = [
+                        styles.pill,
+                        state === "+" ? styles.pillPlus : "",
+                        state === "-" ? styles.pillMinus : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ");
+                      return (
+                        <button
+                          key={tag}
+                          className={cls}
+                          onClick={(e) => onTagClick(e, dim, tag)}
+                        >
+                          {state === "+" && (
+                            <span className={styles.markPlus}>✓</span>
+                          )}
+                          {state === "-" && (
+                            <span className={styles.markMinus}>✕</span>
+                          )}
+                          <span className={styles.pillText}>{tag}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </li>
               );
             })}
