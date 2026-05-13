@@ -189,6 +189,50 @@ async function drawMockComposite(
   return canvas.toDataURL("image/png");
 }
 
+async function drawMockLassoCrop(
+  sourceUrl: string,
+  polygon: [number, number][],
+): Promise<string> {
+  if (polygon.length < 3) throw new Error("mock: polygon needs ≥3 vertices");
+  const img = await loadImage(sourceUrl);
+
+  // bounding box in image-pixel coords (clamped + padded slightly to match backend)
+  const xs = polygon.map((p) => p[0]);
+  const ys = polygon.map((p) => p[1]);
+  const x0 = Math.max(0, Math.floor(Math.min(...xs)) - 4);
+  const y0 = Math.max(0, Math.floor(Math.min(...ys)) - 4);
+  const x1 = Math.min(img.naturalWidth, Math.ceil(Math.max(...xs)) + 4);
+  const y1 = Math.min(img.naturalHeight, Math.ceil(Math.max(...ys)) + 4);
+  const cw = Math.max(1, x1 - x0);
+  const ch = Math.max(1, y1 - y0);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = cw;
+  canvas.height = ch;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("mock: 2d context unavailable");
+
+  // fill with neutral gray so areas outside the polygon look identical to the
+  // real backend's behavior
+  ctx.fillStyle = "rgb(128,128,128)";
+  ctx.fillRect(0, 0, cw, ch);
+
+  // clip to polygon (translated into the crop's local space)
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(polygon[0][0] - x0, polygon[0][1] - y0);
+  for (let i = 1; i < polygon.length; i++) {
+    ctx.lineTo(polygon[i][0] - x0, polygon[i][1] - y0);
+  }
+  ctx.closePath();
+  ctx.clip();
+  // draw the source positioned so (x0,y0) lands at (0,0)
+  ctx.drawImage(img, -x0, -y0);
+  ctx.restore();
+
+  return canvas.toDataURL("image/png");
+}
+
 // ─── public api ────────────────────────────────────────────────────────────
 
 export const mockApi = {
@@ -238,17 +282,30 @@ export const mockApi = {
   async lasso(
     assetId: string,
     polygon: [number, number][],
-    dimensions: Dimension[],
+    _dimensions: Dimension[],
   ): Promise<{ cropped_asset_id: string; tags: Record<Dimension, string[]> }> {
     await new Promise((r) => setTimeout(r, 300));
     const sourceUrl = assetUrls.get(assetId);
     if (!sourceUrl) throw new Error(`mock: asset not found ${assetId}`);
-    const croppedId = registerUrl(sourceUrl, "lasso");
+
+    // Real client-side polygon crop: load source, clip to polygon, gray-fill
+    // outside (matches the backend's PIL behavior — keeps mock/real visually
+    // identical), then crop to the polygon's bounding box. The polygon is in
+    // image-pixel coords relative to the source's naturalWidth/Height.
+    const dataUrl = await drawMockLassoCrop(sourceUrl, polygon);
+    const croppedId = registerUrl(dataUrl, "lasso");
+
+    // Lasso ROI uses a smaller, dynamic dimension set. Until the VLM is wired
+    // we mock Subject + Texture + Composition as the placeholder set.
+    const lassoDims: Dimension[] = ["Subject", "Texture", "Composition"];
     const tags: Partial<Record<Dimension, string[]>> = {};
-    for (const d of dimensions) {
+    for (const d of lassoDims) {
       tags[d] = tagsFor(`${assetId}:lasso:${polygon.length}`, d);
     }
-    return { cropped_asset_id: croppedId, tags: tags as Record<Dimension, string[]> };
+    return {
+      cropped_asset_id: croppedId,
+      tags: tags as Record<Dimension, string[]>,
+    };
   },
 
   async compose(stack: FusionStack): Promise<ComposeResponse> {

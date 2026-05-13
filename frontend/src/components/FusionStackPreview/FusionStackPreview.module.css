@@ -145,6 +145,51 @@
   padding: 10px;
   align-items: stretch;
   position: relative;
+  cursor: grab;
+  transition: opacity 0.12s, transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+}
+.item:active {
+  cursor: grabbing;
+}
+.itemDragging {
+  opacity: 0.4;
+}
+.itemDropTarget {
+  box-shadow: 0 -2px 0 0 var(--accent) inset, 0 8px 18px rgba(139, 92, 246, 0.18);
+  border-color: var(--accent-soft);
+}
+
+.dragHandle {
+  align-self: center;
+  color: var(--fg-1);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  opacity: 0.45;
+  user-select: none;
+  cursor: grab;
+  padding: 0 1px;
+}
+.item:hover .dragHandle {
+  opacity: 0.85;
+}
+
+.baseBadge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  background: var(--accent);
+  color: white;
+  padding: 2px 5px;
+  border-radius: 4px;
+  margin-left: 2px;
+}
+
+.reorderHint {
+  font-size: 10.5px;
+  color: var(--fg-1);
+  opacity: 0.75;
+  margin-top: -4px;
 }
 .itemPlus {
   border-left-color: #7bd88f;

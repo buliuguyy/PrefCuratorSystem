@@ -23,6 +23,12 @@ function signFromEvent(e: React.MouseEvent): Sign {
   return e.metaKey || e.ctrlKey ? "-" : "+";
 }
 
+/** Accent color for a dimension. Falls back to a neutral when the dim doesn't
+ *  match a known key (so the popover gracefully handles dynamic VLM dims). */
+function accentFor(dim: string): string {
+  return (DIMENSION_COLOR as Record<string, string>)[dim] ?? "#9aa0a6";
+}
+
 export function SmartTagPopover({ assetId, onClose }: Props) {
   const asset = useCurator((s) => s.assets[assetId]);
   const setAssetTags = useCurator((s) => s.setAssetTags);
@@ -113,10 +119,9 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
 
         {data && (
           <ul className={styles.dimList}>
-            {ALL_DIMENSIONS.map((dim) => {
-              const tags = data.tags[dim] ?? [];
-              if (tags.length === 0) return null;
-              const accent = DIMENSION_COLOR[dim];
+            {Object.entries(data.tags).map(([dim, tags]) => {
+              if (!tags || tags.length === 0) return null;
+              const accent = accentFor(dim);
               return (
                 <li key={dim} className={styles.dimRow}>
                   <span
@@ -127,7 +132,7 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
                   </span>
                   <div className={styles.pills}>
                     {tags.map((tag) => {
-                      const state = tagState(assetId, dim, tag);
+                      const state = tagState(assetId, dim as Dimension, tag);
                       const cls = [
                         styles.pill,
                         state === "+" ? styles.pillPlus : "",
@@ -139,7 +144,9 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
                         <button
                           key={tag}
                           className={cls}
-                          onClick={(e) => onTagClick(e, dim, tag)}
+                          onClick={(e) =>
+                            onTagClick(e, dim as Dimension, tag)
+                          }
                         >
                           {state === "+" && (
                             <span className={styles.markPlus}>✓</span>

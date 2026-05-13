@@ -41,13 +41,28 @@ images. Commit `1156771`.
   client-rendered composite image (canvas with slot overlay) so the UI
   flow is fully demoable offline
 
-### Phase 4 — Lasso (react-konva)
-- Toggle "Lasso mode" per image tile (or right-click)
-- Free-draw polygon → captured to backend `/api/tagging/lasso`
-- Cropped sub-image becomes its own asset in the Fusion Stack; tagging
-  popover scopes to that ROI
-- Per the screenshot: callouts like "Golden Dome", "Lasso'd Clouds"
-  pointing into the image with dashed selection line
+### ✅ Phase 4 — Lasso (free-draw polygon ROI)
+- Right-click any tile → context menu → "Lasso this image" enters draw mode
+- SVG drawing overlay (deviated from `react-konva` — single polyline + handles
+  was materially simpler as plain SVG; konva stays in deps for future brush
+  masks). Click drops vertices · drag freehands · close by clicking near v0,
+  pressing Enter, or double-clicking · Esc cancels.
+- On commit: `api.lasso(parent, polygon, [])` returns `cropped_asset_id` + tags.
+  The mock `lasso()` now does a real client-side polygon crop (gray-fill outside
+  the polygon, matching backend PIL behavior) so the offline demo is faithful.
+- New `LassoAsset` registers as its own tile on the canvas next to its parent;
+  `SmartTagPopover` auto-opens on the new asset.
+- `PolygonOverlay` renders a persistent dashed polygon + L-label callout inside
+  `.world` on the parent tile (inverse-scaled stroke so dashes stay visually
+  constant at any zoom). Clicking the polygon re-opens its SmartTagPopover.
+- `SmartTagPopover` now iterates `Object.entries(data.tags)` — dimensions are
+  whatever the API returns (resolves outstanding design decision below).
+- **Bonus mid-phase add (per user request):** Feature Fusion Stack is now
+  drag-reorderable. The asset of the FIRST positive (`+`) concept in the
+  stack becomes `base_asset_id` in the compose payload (replacing the prior
+  most-positive-count heuristic). A "BASE" badge marks which row is currently
+  driving the base image.
+  Commit `<pending>`.
 
 ### Phase 5 — Intensity sliders → real recompose
 - Slider drag (debounced 200ms) → recompose with adjusted alphas
@@ -79,9 +94,10 @@ images. Commit `1156771`.
 
 - [ ] How does "Asset Library" relate to candidates? Are dropped/uploaded
   images allowed in the library independent of the prompt-generated grid?
-- [ ] Lasso ROI tagging: should it open a Smart Tag popover scoped to JUST
-  Subject / Texture / Composition (vs. the full 5 dimensions)? The
-  screenshot only shows Subject + Texture.
+- [x] **Resolved (Phase 4):** Lasso ROI tagging dimensions — popover renders
+  whatever dimensions the API returns (dynamic per-image, future VLM-driven).
+  Mock returns `Subject + Texture + Composition` for ROIs. Same dynamic-iter
+  pattern is also used by the full-image SmartTagPopover.
 - [ ] Mixer Group "Locked" semantics: what's the unlocked default? Each
   slider independent, or all sliders move together by default?
 - [ ] Persona schema: persistent UUIDs vs. user-given names? Versioning?

@@ -11,6 +11,7 @@ import type {
   FusionStack,
   GeneratedAsset,
   Group,
+  LassoAsset,
   Sign,
   TagResult,
 } from "@/types";
@@ -118,6 +119,17 @@ interface CuratorState {
   gallery: GalleryEntry[];
   activeGalleryId: string | null;
 
+  /** When non-null, the canvas mounts the lasso drawing overlay over the
+   *  named tile. Set by right-click → "Lasso this image". */
+  lassoMode: { sourceAssetId: string } | null;
+
+  /** When non-null, SmartTagPopover opens for this asset. Driven by:
+   *   - tile click in Canvas (legacy local state, still set there)
+   *   - commitLasso after the API returns
+   *   - clicking on a persisted polygon overlay
+   */
+  activePopoverAssetId: string | null;
+
   // ─── mutations ──────────────────────────────────────────────────────────
   setPrompt(p: string): void;
   setLoadingCandidates(b: boolean): void;
@@ -128,6 +140,7 @@ interface CuratorState {
 
   registerAssets(assets: Asset[], inset?: number): void;
   setAssetTags(assetId: string, tags: TagResult): void;
+  setOriginalDims(assetId: string, w: number, h: number): void;
   moveCanvasItem(assetId: string, x: number, y: number): void;
   /** Move many items by absolute deltas — used for multi-select drag. */
   moveCanvasItems(deltas: { assetId: string; x: number; y: number }[]): void;
@@ -153,11 +166,21 @@ interface CuratorState {
   removeConcept(key: string): void;
   clearStack(): void;
   updateAlpha(key: string, alpha: number): void;
+  /** Reorder the per-tag concept list: move the concept at `fromIndex` so it
+   *  sits at `toIndex` after the move. Drives both UI order in
+   *  FusionStackPreview and group order in the FusionStack payload sent to
+   *  backend — and therefore which asset becomes `base_asset_id`. */
+  reorderConcept(fromIndex: number, toIndex: number): void;
 
   toFusionStack(seed?: number, numSamples?: number): FusionStack | null;
   compose(): Promise<void>;
 
   generate(): Promise<void>;
+
+  startLasso(sourceAssetId: string): void;
+  cancelLasso(): void;
+  commitLasso(polygonImg: [number, number][]): Promise<void>;
+  setActivePopover(assetId: string | null): void;
 
   loadGalleryEntry(id: string): void;
   removeGalleryEntry(id: string): void;
@@ -199,6 +222,9 @@ export const useCurator = create<CuratorState>((set, get) => ({
   gallery: [],
   activeGalleryId: null,
 
+  lassoMode: null,
+  activePopoverAssetId: null,
+
   setPrompt: (p) => set({ prompt: p }),
   setLoadingCandidates: (b) => set({ loadingCandidates: b }),
   setView: (v) => set({ view: v }),
@@ -236,6 +262,19 @@ export const useCurator = create<CuratorState>((set, get) => ({
       const a = s.assets[assetId];
       if (!a) return {};
       return { assets: { ...s.assets, [assetId]: { ...a, tags } as Asset } };
+    }),
+
+  setOriginalDims: (assetId, w, h) =>
+    set((s) => {
+      const a = s.assets[assetId];
+      if (!a) return {};
+      if (a.originalW === w && a.originalH === h) return {};
+      return {
+        assets: {
+          ...s.assets,
+          [assetId]: { ...a, originalW: w, originalH: h } as Asset,
+        },
+      };
     }),
 
   moveCanvasItem: (assetId, x, y) =>
@@ -328,6 +367,17 @@ export const useCurator = create<CuratorState>((set, get) => ({
       stack: s.stack.map((c) => (c.key === key ? { ...c, alpha } : c)),
     })),
 
+  reorderConcept: (fromIndex, toIndex) =>
+    set((s) => {
+      if (fromIndex === toIndex) return {};
+      if (fromIndex < 0 || fromIndex >= s.stack.length) return {};
+      const clamped = Math.max(0, Math.min(s.stack.length - 1, toIndex));
+      const next = s.stack.slice();
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(clamped, 0, moved);
+      return { stack: next };
+    }),
+
   toFusionStack: (seed, numSamples) => {
     const state = get();
     const { stack } = state;
@@ -351,13 +401,11 @@ export const useCurator = create<CuratorState>((set, get) => ({
       });
     }
 
-    const positiveCounts: Record<string, number> = {};
-    for (const c of stack) {
-      if (c.sign === "+") positiveCounts[c.assetId] = (positiveCounts[c.assetId] ?? 0) + 1;
-    }
-    const base =
-      Object.entries(positiveCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ??
-      stack[0].assetId;
+    // The asset of the FIRST positive concept in the (user-orderable) stack
+    // becomes the IP-Composer base. Falls back to the first concept overall
+    // if everything is disliked (unusual but defensive).
+    const firstPositive = stack.find((c) => c.sign === "+");
+    const base = firstPositive?.assetId ?? stack[0].assetId;
 
     return {
       base_asset_id: base,
@@ -450,6 +498,56 @@ export const useCurator = create<CuratorState>((set, get) => ({
         isComposing: false,
         composeError: e instanceof Error ? e.message : String(e),
       });
+    }
+  },
+
+  startLasso: (sourceAssetId) =>
+    set((s) =>
+      s.assets[sourceAssetId] ? { lassoMode: { sourceAssetId } } : {},
+    ),
+
+  cancelLasso: () => set({ lassoMode: null }),
+
+  setActivePopover: (assetId) => set({ activePopoverAssetId: assetId }),
+
+  commitLasso: async (polygonImg) => {
+    const state = get();
+    const mode = state.lassoMode;
+    if (!mode) return;
+    const parent = state.assets[mode.sourceAssetId];
+    if (!parent || polygonImg.length < 3) {
+      set({ lassoMode: null });
+      return;
+    }
+
+    set({ lassoMode: null });
+
+    try {
+      const res = await api.lasso(
+        parent.id,
+        polygonImg,
+        [] as never as Dimension[],
+      );
+
+      const lassoAsset: LassoAsset = {
+        id: res.cropped_asset_id,
+        url: api.assetUrl(res.cropped_asset_id) || parent.url,
+        origin: "lasso",
+        createdAt: Date.now(),
+        label: "",
+        parentAssetId: parent.id,
+        polygon: polygonImg,
+      };
+      state.registerAssets([lassoAsset], 8);
+
+      const tagResult: TagResult = {
+        asset_id: lassoAsset.id,
+        tags: res.tags as Partial<Record<Dimension, string[]>>,
+      };
+      get().setAssetTags(lassoAsset.id, tagResult);
+      set({ activePopoverAssetId: lassoAsset.id });
+    } catch (e) {
+      set({ composeError: e instanceof Error ? e.message : String(e) });
     }
   },
 

@@ -75,6 +75,10 @@ interface AssetCommon {
   label: string;
   /** Lazily populated by Smart Tagging. */
   tags?: TagResult;
+  /** Captured on first <img onLoad>; used by lasso layer to convert
+   *  stage-pixel polygons → image-pixel polygons. */
+  originalW?: number;
+  originalH?: number;
 }
 
 export interface GeneratedAsset extends AssetCommon {

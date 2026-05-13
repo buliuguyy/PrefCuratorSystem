@@ -228,3 +228,35 @@
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+.ctxMenu {
+  position: fixed;
+  z-index: 40;
+  min-width: 168px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  font-size: 12.5px;
+}
+.ctxItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  color: var(--fg-0);
+  cursor: pointer;
+  border-radius: 5px;
+  text-align: left;
+}
+.ctxItem:hover {
+  background: var(--bg-3);
+}
+.ctxIcon {
+  font-size: 13px;
+  opacity: 0.8;
+}

@@ -1,14 +1,21 @@
 "use client";
 
+import { useState } from "react";
+
 import { useCurator } from "@/store/useCurator";
 import { SamplesSelector } from "@/components/SamplesSelector/SamplesSelector";
-import { DIMENSION_COLOR } from "@/types";
+import { DIMENSION_COLOR, type Dimension } from "@/types";
 
 import styles from "./FusionStackPreview.module.css";
+
+function accentFor(dim: string): string {
+  return (DIMENSION_COLOR as Record<string, string>)[dim] ?? "#9aa0a6";
+}
 
 export function FusionStackPreview() {
   const stack = useCurator((s) => s.stack);
   const removeConcept = useCurator((s) => s.removeConcept);
+  const reorderConcept = useCurator((s) => s.reorderConcept);
   const clearStack = useCurator((s) => s.clearStack);
   const assets = useCurator((s) => s.assets);
 
@@ -24,6 +31,13 @@ export function FusionStackPreview() {
   const canCompose = stack.length > 0 && !isComposing;
   const hasResult = resultAssetIds.length > 0;
   const showSamplesHere = view === "canvas";
+
+  // Index of the FIRST positive concept — its asset becomes base_asset_id.
+  const firstPositiveIdx = stack.findIndex((c) => c.sign === "+");
+
+  // drag-to-reorder local state
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   return (
     <aside className={styles.panel}>
@@ -41,6 +55,12 @@ export function FusionStackPreview() {
             ? "no features selected yet"
             : `${plusCount} liked · ${minusCount} disliked`}
         </div>
+        {stack.length >= 2 && (
+          <div className={styles.reorderHint}>
+            drag to reorder · first <span className={styles.likeSpan}>+</span>{" "}
+            item&apos;s image is the base
+          </div>
+        )}
 
         <div className={styles.composeRow}>
           <button
@@ -87,18 +107,66 @@ export function FusionStackPreview() {
           </div>
         )}
 
-        {stack.map((c) => {
-          const accent = DIMENSION_COLOR[c.dimension];
+        {stack.map((c, idx) => {
+          const accent = accentFor(c.dimension as Dimension | string);
           const asset = assets[c.assetId];
           const label = asset?.label ?? "?";
           const isComposed = asset?.origin === "composed";
+          const isLasso = asset?.origin === "lasso";
+          const isBase = idx === firstPositiveIdx;
+          const isDragging = dragIdx === idx;
+          const isHover = hoverIdx === idx && dragIdx !== null && dragIdx !== idx;
           return (
             <div
               key={c.key}
-              className={`${styles.item} ${
-                c.sign === "+" ? styles.itemPlus : styles.itemMinus
-              }`}
+              className={[
+                styles.item,
+                c.sign === "+" ? styles.itemPlus : styles.itemMinus,
+                isDragging ? styles.itemDragging : "",
+                isHover ? styles.itemDropTarget : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              draggable
+              onDragStart={(e) => {
+                setDragIdx(idx);
+                e.dataTransfer.effectAllowed = "move";
+                // Firefox needs setData to actually start a drag
+                try {
+                  e.dataTransfer.setData("text/plain", String(idx));
+                } catch {
+                  /* some browsers throw on setData in dragstart */
+                }
+              }}
+              onDragOver={(e) => {
+                if (dragIdx === null) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (hoverIdx !== idx) setHoverIdx(idx);
+              }}
+              onDragLeave={() => {
+                if (hoverIdx === idx) setHoverIdx(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragIdx !== null && dragIdx !== idx) {
+                  reorderConcept(dragIdx, idx);
+                }
+                setDragIdx(null);
+                setHoverIdx(null);
+              }}
+              onDragEnd={() => {
+                setDragIdx(null);
+                setHoverIdx(null);
+              }}
             >
+              <span
+                className={styles.dragHandle}
+                title="drag to reorder"
+                aria-hidden
+              >
+                ⋮⋮
+              </span>
               <img
                 src={asset?.url ?? ""}
                 alt={`asset ${label}`}
@@ -114,8 +182,17 @@ export function FusionStackPreview() {
                   </span>
                   <span className={styles.assetLabel}>
                     {isComposed && <span className={styles.composedMark}>✦</span>}
+                    {isLasso && <span className={styles.composedMark}>✂</span>}
                     {label}
                   </span>
+                  {isBase && (
+                    <span
+                      className={styles.baseBadge}
+                      title="this concept's asset is the IP-Composer base image"
+                    >
+                      BASE
+                    </span>
+                  )}
                   <span
                     className={`${styles.signBadge} ${
                       c.sign === "+" ? styles.signPlus : styles.signMinus

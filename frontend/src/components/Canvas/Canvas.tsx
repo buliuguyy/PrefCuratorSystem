@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { useCurator } from "@/store/useCurator";
 import { SmartTagPopover } from "@/components/SmartTagPopover/SmartTagPopover";
+import { LassoOverlay } from "@/components/LassoOverlay/LassoOverlay";
+import { PolygonOverlay } from "@/components/LassoOverlay/PolygonOverlay";
 import type { Asset, CanvasItem } from "@/types";
 
 import styles from "./Canvas.module.css";
@@ -64,8 +66,16 @@ export function Canvas() {
   const toggleSelect = useCurator((s) => s.toggleSelectAsset);
   const clearSelection = useCurator((s) => s.clearSelection);
   const loading = useCurator((s) => s.loadingCandidates);
+  const setOriginalDims = useCurator((s) => s.setOriginalDims);
+  const startLasso = useCurator((s) => s.startLasso);
+  const cancelLasso = useCurator((s) => s.cancelLasso);
+  const lassoMode = useCurator((s) => s.lassoMode);
+  const activePopoverAssetId = useCurator((s) => s.activePopoverAssetId);
+  const setActivePopover = useCurator((s) => s.setActivePopover);
 
-  const [activeAssetId, setActiveAssetId] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<
+    { assetId: string; clientX: number; clientY: number } | null
+  >(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragRef | null>(null);
 
@@ -180,7 +190,7 @@ export function Canvas() {
     if (!wasDrag) {
       if (d.kind === "tile") {
         // click on a tile (not a drag) → open Smart Tag
-        setActiveAssetId(d.primaryAssetId);
+        setActivePopover(d.primaryAssetId);
       } else if (d.kind === "pan") {
         // click on empty → clear selection (only if we used left button on empty)
         if (selectedAssetIds.length > 0) clearSelection();
@@ -229,6 +239,38 @@ export function Canvas() {
   function onContextMenu(e: React.MouseEvent) {
     e.preventDefault();
   }
+
+  function onTileContextMenu(
+    e: React.MouseEvent<HTMLButtonElement>,
+    item: CanvasItem,
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({
+      assetId: item.assetId,
+      clientX: e.clientX,
+      clientY: e.clientY,
+    });
+  }
+
+  // close ctx menu on outside click / scroll / blur / Esc; Esc also cancels lasso draw
+  useEffect(() => {
+    const close = () => setCtxMenu(null);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (ctxMenu) setCtxMenu(null);
+        if (lassoMode) cancelLasso();
+      }
+    }
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ctxMenu, lassoMode, cancelLasso]);
 
   if (loading && items.length === 0) {
     return (
@@ -287,6 +329,31 @@ export function Canvas() {
                 onPointerDown={(e) => onTilePointerDown(e, it)}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
+                onContextMenu={(e) => onTileContextMenu(e, it)}
+                onImgLoad={(e) => {
+                  const img = e.currentTarget;
+                  if (img.naturalWidth && img.naturalHeight) {
+                    setOriginalDims(
+                      asset.id,
+                      img.naturalWidth,
+                      img.naturalHeight,
+                    );
+                  }
+                }}
+              />
+            );
+          })}
+          {/* persisted dashed-polygon overlays inside .world so they pan/zoom with the canvas */}
+          {items.map((it) => {
+            const a = assets[it.assetId];
+            if (!a) return null;
+            return (
+              <PolygonOverlay
+                key={`poly-${it.assetId}`}
+                parentItem={it}
+                parentAsset={a}
+                zoom={zoom}
+                onClick={(lassoAssetId) => setActivePopover(lassoAssetId)}
               />
             );
           })}
@@ -340,7 +407,7 @@ export function Canvas() {
         </div>
 
         <div className={styles.panHint}>
-          middle-drag or Alt+drag to pan · ⌘/Ctrl+wheel to zoom · Shift-click to multi-select · click tile to smart-tag
+          middle-drag or Alt+drag to pan · ⌘/Ctrl+wheel to zoom · Shift-click to multi-select · click tile to smart-tag · right-click tile to lasso
         </div>
 
         {selectedAssetIds.length > 0 && (
@@ -351,12 +418,56 @@ export function Canvas() {
             </button>
           </div>
         )}
+
+        {lassoMode && (
+          <LassoOverlay
+            sourceAssetId={lassoMode.sourceAssetId}
+            viewportRef={viewportRef}
+          />
+        )}
       </div>
 
-      {activeAssetId && (
+      {ctxMenu && (
+        <div
+          className={styles.ctxMenu}
+          style={{ left: ctxMenu.clientX, top: ctxMenu.clientY }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            className={styles.ctxItem}
+            onClick={() => {
+              startLasso(ctxMenu.assetId);
+              setCtxMenu(null);
+            }}
+          >
+            <span className={styles.ctxIcon}>✂</span>
+            Lasso this image
+          </button>
+        </div>
+      )}
+
+      {/* clicking the backdrop closes the ctx menu — render a transparent
+          full-viewport catcher under the menu so the user doesn't have to hit
+          a precise spot */}
+      {ctxMenu && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 35,
+          }}
+          onPointerDown={() => setCtxMenu(null)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setCtxMenu(null);
+          }}
+        />
+      )}
+
+      {activePopoverAssetId && (
         <SmartTagPopover
-          assetId={activeAssetId}
-          onClose={() => setActiveAssetId(null)}
+          assetId={activePopoverAssetId}
+          onClose={() => setActivePopover(null)}
         />
       )}
     </>
@@ -370,6 +481,8 @@ interface TileProps {
   onPointerDown(e: React.PointerEvent<HTMLButtonElement>): void;
   onPointerMove(e: React.PointerEvent): void;
   onPointerUp(e: React.PointerEvent): void;
+  onContextMenu(e: React.MouseEvent<HTMLButtonElement>): void;
+  onImgLoad(e: React.SyntheticEvent<HTMLImageElement>): void;
 }
 
 function Tile({
@@ -379,8 +492,11 @@ function Tile({
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  onContextMenu,
+  onImgLoad,
 }: TileProps) {
   const composed = asset.origin === "composed";
+  const lasso = asset.origin === "lasso";
   return (
     <button
       className={[
@@ -400,15 +516,20 @@ function Tile({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onContextMenu={onContextMenu}
+      data-asset-id={asset.id}
+      data-origin={asset.origin}
     >
       <img
         src={asset.url}
         alt={asset.label}
         className={styles.tileImg}
         draggable={false}
+        onLoad={onImgLoad}
       />
       <span className={styles.tileLabel}>
         {composed && <span className={styles.composedMark}>✦</span>}
+        {lasso && <span className={styles.composedMark}>✂</span>}
         {asset.label}
       </span>
       {selected && <span className={styles.selectMark}>✓</span>}
