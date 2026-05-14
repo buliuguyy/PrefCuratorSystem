@@ -28,17 +28,43 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+interface RawCandidate {
+  id: string;
+  url: string;
+  prompt?: string;
+  generator?: string;
+}
+
 const realApi = {
   base: API_BASE,
   assetUrl: (id: string) => `${API_BASE}/api/assets/${id}`,
   health: () => jsonFetch<{ status: string; phase: string }>("/health"),
-  generateCandidates: (prompt: string, n: number = 4) =>
-    // Real backend still returns minimal AssetRef[] — the store backfills the
-    // remaining GeneratedAsset fields (origin, createdAt, prompt, generator).
-    jsonFetch<{ candidates: (AssetRef | GeneratedAsset)[] }>("/api/candidates", {
-      method: "POST",
-      body: JSON.stringify({ prompt, n }),
-    }),
+  generateCandidates: async (
+    prompt: string,
+    n: number = 4,
+  ): Promise<{ candidates: (AssetRef | GeneratedAsset)[] }> => {
+    const res = await jsonFetch<{ candidates: RawCandidate[] }>(
+      "/api/candidates",
+      {
+        method: "POST",
+        body: JSON.stringify({ prompt, n }),
+      },
+    );
+    // Backfill the full GeneratedAsset shape so the store doesn't have to
+    // know about backend response variants. Use the per-variant prompt the
+    // backend rewrote with the prompt-expander (falls back to the user's
+    // raw prompt if the backend didn't surface one).
+    const candidates: GeneratedAsset[] = res.candidates.map((c) => ({
+      id: c.id,
+      url: `${API_BASE}${c.url}`,
+      origin: "generated" as const,
+      createdAt: Date.now(),
+      label: "",
+      prompt: c.prompt ?? prompt,
+      generator: c.generator ?? "backend",
+    }));
+    return { candidates };
+  },
   smartTag: (assetId: string, dimensions: Dimension[]) =>
     jsonFetch<TagResult>("/api/tagging/smart-tag", {
       method: "POST",

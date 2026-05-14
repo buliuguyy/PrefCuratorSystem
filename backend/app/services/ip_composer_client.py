@@ -121,8 +121,8 @@ async def compose(stack: FusionStack) -> ComposeOutcome:
                     used_mock=False,
                 )
             raise RuntimeError(f"unexpected IP-Composer response shape: {list(data)[:5]}")
-    except (httpx.ConnectError, httpx.ReadTimeout) as e:
-        log.warning("IP-Composer unreachable (%s) — using mock composite", e)
+    except (httpx.ConnectError, httpx.ReadTimeout, httpx.HTTPStatusError, httpx.RequestError) as e:
+        log.warning("IP-Composer unreachable / errored (%s) — using mock composite", e)
         return ComposeOutcome(image_bytes=_mock_composite(stack, specs), used_mock=True)
 
 

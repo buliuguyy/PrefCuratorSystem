@@ -92,6 +92,18 @@ const TAG_POOLS: Record<Dimension, string[][]> = {
     ["isometric", "flat front view"],
     ["floating in clouds", "high horizon"],
   ],
+  Detail: [
+    ["carved wood trim", "intricate fretwork"],
+    ["frayed canvas edges", "weathered brass"],
+    ["clean vector outlines", "sharp corners"],
+    ["luminous mist trails", "glittering specks"],
+  ],
+  Atmosphere: [
+    ["smoky", "dusk-veiled", "candlelit"],
+    ["crisp morning", "alpine clear"],
+    ["sun-drenched", "playful summer"],
+    ["dreamlike haze", "soft ethereal glow"],
+  ],
 };
 
 function hash(s: string): number {

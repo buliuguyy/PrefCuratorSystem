@@ -1,34 +1,60 @@
-"""Initial 4 candidate image generation.
+"""Initial N candidate image generation.
 
-Phase 2.5: prefers real placeholder images from `frontend/temporary_assets/`
-when available, falls back to generated gradients otherwise. The real
-implementation will swap this whole module for a text-to-image API call while
-keeping the `generate_candidates(prompt, n)` signature.
+Pipeline (strict 1:1 fan-out — N variants ⇒ N images, one per variant):
+  1. Expand the user prompt into N diverse variants via prompt_expander_client
+     (GPT-mini with an art-director system prompt). Each variant pushes on a
+     different unspecified aesthetic dimension.
+  2. For each variant, call Gemini 3 Pro Image ("nano banana pro") via
+     gemini_image_client EXACTLY ONCE. The N Gemini calls run concurrently
+     via asyncio.gather, each with its own distinct variant prompt.
+  3. Any variant whose Gemini call fails (no creds / API error / no image
+     in response) is replaced INDIVIDUALLY with a placeholder so the user
+     always gets N tiles. Successful variants are NOT swapped out.
+
+We deliberately do NOT ask Gemini for multiple samples per call. One
+variant ↔ one image keeps the per-tile prompt traceable in the UI.
+
+Placeholder ordering: prefers the 4 user-uploaded images in
+`frontend/temporary_assets/` if present; otherwise generates synthetic
+gradient PNGs.
+
+Returns `list[CandidateOut]` with the asset id paired with the variant prompt
+that produced it (so the frontend can surface "this tile was made from
+prompt X" in the inspiration grid).
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from app.services import gemini_image_client, prompt_expander_client
 from app.storage import store
 
-# ─── real-image source (user-uploaded placeholders) ─────────────────────────
+log = logging.getLogger(__name__)
 
-# Resolved from the backend module location so it works regardless of CWD.
+
+@dataclass(frozen=True)
+class CandidateOut:
+    asset_id: str
+    prompt: str
+    generator: str  # "gemini" | "placeholder" | "synthetic"
+
+
+# ─── placeholder source (user-uploaded images) ─────────────────────────────
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TEMP_ASSETS = _REPO_ROOT / "frontend" / "temporary_assets"
-
-# Filenames in stable label order (1.png maps to slot 0/A, etc.)
 _TEMP_FILES = ["1.png", "2.png", "3.png", "4.png"]
 
 
 def _load_temporary_assets() -> list[bytes] | None:
-    """Return cached bytes of the 4 user-uploaded placeholders, or None
-    if any are missing."""
     if not _TEMP_ASSETS.is_dir():
         return None
     out: list[bytes] = []
@@ -40,11 +66,10 @@ def _load_temporary_assets() -> list[bytes] | None:
     return out
 
 
-# Load once at import time. If the user later adds/removes files, restart.
 _REAL_CANDIDATES: list[bytes] | None = _load_temporary_assets()
 
 
-# ─── synthetic fallback (gradient placeholders) ─────────────────────────────
+# ─── synthetic fallback ─────────────────────────────────────────────────────
 
 _PALETTES: list[tuple[str, tuple[int, int, int], tuple[int, int, int]]] = [
     ("A · spooky cottage",   (24, 13, 38),    (181, 76, 209)),
@@ -54,8 +79,8 @@ _PALETTES: list[tuple[str, tuple[int, int, int], tuple[int, int, int]]] = [
 ]
 
 
-def _make_placeholder(label: str, bg: tuple[int, int, int], fg: tuple[int, int, int],
-                      seed: str) -> bytes:
+def _make_synthetic(label: str, bg: tuple[int, int, int], fg: tuple[int, int, int],
+                    seed: str) -> bytes:
     size = 512
     img = Image.new("RGB", (size, size), bg)
     pixels = img.load()
@@ -85,28 +110,59 @@ def _make_placeholder(label: str, bg: tuple[int, int, int], fg: tuple[int, int, 
     return buf.getvalue()
 
 
+def _fallback_bytes(idx: int, variant_prompt: str) -> tuple[bytes, str]:
+    """Return placeholder PNG bytes + a tag describing which fallback was used."""
+    if _REAL_CANDIDATES is not None:
+        return _REAL_CANDIDATES[idx % len(_REAL_CANDIDATES)], "placeholder"
+    label, bg, fg = _PALETTES[idx % len(_PALETTES)]
+    png = _make_synthetic(
+        label=f"{label}  ·  '{variant_prompt[:40]}'",
+        bg=bg, fg=fg,
+        seed=f"{variant_prompt}:{idx}",
+    )
+    return png, "synthetic"
+
+
 # ─── public api ─────────────────────────────────────────────────────────────
 
 
-def generate_candidates(prompt: str, n: int = 4) -> list[str]:
-    """Generate `n` candidate images, store them, return asset ids."""
+async def _gen_one(idx: int, variant_prompt: str) -> CandidateOut:
+    """Generate ONE image for ONE variant prompt. Falls back to a placeholder
+    on Gemini failure."""
+    log.info("image_gen[%d] → gemini prompt: %s", idx, variant_prompt[:120])
+    img_bytes = await gemini_image_client.generate_image(variant_prompt)
+    generator = "gemini"
+    if img_bytes is None:
+        img_bytes, generator = _fallback_bytes(idx, variant_prompt)
+        log.info("image_gen[%d] ← FALLBACK (%s)", idx, generator)
+    else:
+        log.info("image_gen[%d] ← gemini ok (%d bytes)", idx, len(img_bytes))
+    # Gemini may return PNG or JPEG; default to image/png since that's what
+    # the placeholder path uses. Pillow re-encodes to PNG only on synthetic.
+    content_type = "image/png"
+    asset = store.put(img_bytes, content_type=content_type)
+    return CandidateOut(asset_id=asset.id, prompt=variant_prompt, generator=generator)
+
+
+async def generate_candidates(prompt: str, n: int = 4) -> list[CandidateOut]:
+    """Generate exactly `n` candidate images via prompt-expand → fan-out Gemini.
+
+    One image per variant prompt. Slot i in the returned list corresponds to
+    variant i — the order is preserved so frontend tile order matches the
+    prompt ordering produced by the expander."""
     n = max(1, min(n, 4))
-    ids: list[str] = []
+    variants = await prompt_expander_client.expand(prompt, n)
+    # Pad / trim defensively (expander guarantees this but it's cheap insurance).
+    while len(variants) < n:
+        variants.append(prompt)
+    variants = variants[:n]
 
-    if _REAL_CANDIDATES is not None:
-        for i in range(n):
-            asset = store.put(_REAL_CANDIDATES[i])
-            ids.append(asset.id)
-        return ids
+    log.info("image_gen: expanded %r into %d variant(s)", prompt[:60], len(variants))
+    for i, v in enumerate(variants):
+        log.info("  variant[%d]: %s", i, v[:160])
 
-    # synthetic fallback
-    for i in range(n):
-        label, bg, fg = _PALETTES[i]
-        png = _make_placeholder(
-            label=f"{label}  ·  '{prompt[:40]}'",
-            bg=bg, fg=fg,
-            seed=f"{prompt}:{i}",
-        )
-        asset = store.put(png)
-        ids.append(asset.id)
-    return ids
+    # asyncio.gather preserves the order of the input task list, so
+    # results[i] is guaranteed to be the image for variants[i].
+    tasks = [_gen_one(i, v) for i, v in enumerate(variants)]
+    results = await asyncio.gather(*tasks)
+    return list(results)

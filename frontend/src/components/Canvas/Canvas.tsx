@@ -425,6 +425,19 @@ export function Canvas() {
             viewportRef={viewportRef}
           />
         )}
+
+        {loading && items.length > 0 && (
+          <div className={styles.regenBanner}>
+            <span className={styles.regenBannerSpinner} />
+            <span>Generating new candidates…</span>
+            <span className={styles.regenDots}>
+              <span className={styles.regenDot} />
+              <span className={styles.regenDot} />
+              <span className={styles.regenDot} />
+              <span className={styles.regenDot} />
+            </span>
+          </div>
+        )}
       </div>
 
       {ctxMenu && (

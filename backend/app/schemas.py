@@ -7,15 +7,20 @@ from pydantic import BaseModel, Field
 
 # ─── shared primitives ─────────────────────────────────────────────────────────
 
+# The 9-dim pool the VLM is allowed to pick from. Kept as a Literal so the
+# frontend → backend hint is type-checked. Note: VLM responses MAY include
+# novel dimension names; those flow back via TagResult.tags whose key type
+# is intentionally `str` (not Dimension) to tolerate that.
 Dimension = Literal[
-    "Color", "Style", "Texture", "Lighting", "Mood", "Subject", "Composition"
+    "Color", "Style", "Texture", "Lighting", "Mood",
+    "Subject", "Composition", "Detail", "Atmosphere",
 ]
 
 
 class Concept(BaseModel):
     """One semantic concept extracted from one image — maps to one IP-Composer slot."""
 
-    dimension: Dimension
+    dimension: str  # tolerates any dim string the VLM returns
     tags: list[str] = Field(min_length=1)
     alpha: float = 1.0  # frontend always sends positive; sign comes from group
     name: str  # short id e.g. "A_color"
@@ -51,31 +56,49 @@ class AssetRef(BaseModel):
     url: str  # relative path mountable by frontend: /api/assets/{id}
 
 
+class CandidateAsset(BaseModel):
+    """Candidate produced by the initial image generation pipeline. Includes
+    the variant prompt the LLM expanded to (so the frontend can surface it)
+    and which generator actually produced the bytes."""
+
+    id: str
+    url: str
+    prompt: str
+    generator: str  # "gemini" | "placeholder" | "synthetic"
+
+
 class CandidateResponse(BaseModel):
-    candidates: list[AssetRef]
+    candidates: list[CandidateAsset]
 
 
 class SmartTagRequest(BaseModel):
     asset_id: str
-    dimensions: list[Dimension] = ["Color", "Style", "Texture", "Lighting", "Mood"]
+    # Hint to the VLM. With a real VLM, this is ignored — the model picks its
+    # own subset from its prompt's 9-dim pool.
+    dimensions: list[Dimension] = [
+        "Color", "Style", "Texture", "Lighting", "Mood",
+        "Subject", "Composition", "Detail", "Atmosphere",
+    ]
 
 
 class TagResult(BaseModel):
-    """Per-dimension suggested tags for an asset."""
+    """Per-dimension suggested tags for an asset. The `tags` key type is str
+    (not Dimension) so a VLM that emits e.g. "Background" doesn't fail
+    validation."""
 
     asset_id: str
-    tags: dict[Dimension, list[str]]
+    tags: dict[str, list[str]]
 
 
 class LassoRequest(BaseModel):
     asset_id: str
     polygon: list[tuple[float, float]] = Field(min_length=3)
-    dimensions: list[Dimension] = ["Subject", "Texture"]
+    dimensions: list[Dimension] = ["Subject", "Texture", "Composition"]
 
 
 class LassoResponse(BaseModel):
     cropped_asset_id: str
-    tags: dict[Dimension, list[str]]
+    tags: dict[str, list[str]]
 
 
 class ComposeResponse(BaseModel):

@@ -1,14 +1,22 @@
 """End-to-end smoke test of the Phase 1 backend.
 
-Runs entirely with mock service clients — IP-Composer is expected to be
-unreachable in CI, so we assert that the mock fallback kicks in.
+Runs entirely with mock service clients. IP-Composer is force-redirected to
+a deliberately-unreachable URL so the fallback triggers on a fast connect
+refusal instead of (potentially) waiting for the user's running IP-Composer
+at localhost:12100 to time out.
 """
 
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+# Force IP-Composer URL to an unreachable address BEFORE app import so the
+# config picks it up. 192.0.2.0/24 is the RFC 5737 docs/test space — every
+# OS routes it to "host unreachable" within milliseconds.
+import os
+os.environ["IP_COMPOSER_URL"] = "http://192.0.2.1:65535"
+
+from app.main import app  # noqa: E402
 
 client = TestClient(app)
 
@@ -17,7 +25,7 @@ def test_full_pipeline_with_mock_fallback() -> None:
     # 1. health
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json()["phase"] == "1-mock-clients"
+    assert r.json()["status"] == "ok"
 
     # 2. candidates
     r = client.post("/api/candidates", json={"prompt": "a haunted house", "n": 4})

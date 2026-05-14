@@ -21,9 +21,15 @@ router = APIRouter(prefix="/api/tagging", tags=["tagging"])
 
 @router.post("/smart-tag", response_model=TagResult)
 async def smart_tag(req: SmartTagRequest) -> TagResult:
-    if req.asset_id not in store:
+    asset = store.get(req.asset_id)
+    if asset is None:
         raise HTTPException(status_code=404, detail="asset not found")
-    tags = vlm_tagger_client.smart_tag(req.asset_id, req.dimensions)
+    tags = await vlm_tagger_client.smart_tag(
+        asset.bytes_,
+        list(req.dimensions),
+        content_type=asset.content_type,
+        seed_hint=req.asset_id,
+    )
     return TagResult(asset_id=req.asset_id, tags=tags)
 
 
@@ -34,7 +40,11 @@ async def lasso(req: LassoRequest) -> LassoResponse:
         raise HTTPException(status_code=404, detail="asset not found")
     cropped_png = _crop_polygon(asset.bytes_, req.polygon)
     new_asset = store.put(cropped_png)
-    tags = vlm_tagger_client.tag_cropped(cropped_png, req.dimensions, seed_hint=req.asset_id)
+    tags = await vlm_tagger_client.tag_cropped(
+        cropped_png,
+        list(req.dimensions),
+        seed_hint=req.asset_id,
+    )
     return LassoResponse(cropped_asset_id=new_asset.id, tags=tags)
 
 

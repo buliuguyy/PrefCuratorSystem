@@ -72,23 +72,38 @@ images. Commit `1156771`.
 - Until backend is wired, slider changes only update the mock composite
   visually
 
-### Phase 6 — Persona panel + real backend algorithms
+### ✅ Phase 6a — VLM smart-tag (real)
+GPT-5.4-mini via OPENAI_BASE_URL with the curator prompt; tolerant parser
+handles novel dimension names. Mock fallback preserved for offline dev.
+
+### ✅ Phase 6b — Initial image generation (real)
+- `prompt_expander_client`: GPT-mini rewrites the user prompt into N
+  variants that diverge on aesthetic dimensions the prompt didn't pin
+  (style / lighting / mood / palette / texture / composition / atmosphere).
+  System prompt enforces ≥2-dim divergence per pair and keeps user-pinned
+  dimensions fixed.
+- `gemini_image_client`: raw httpx call to `gemini-3-pro-image-preview`
+  via the nuwaflux proxy (`https://api.nuwaflux.com`). Parses both
+  `inlineData` and base64-data-URL-in-text response shapes.
+- `image_gen_client.generate_candidates` is now async: expand → fan out
+  Gemini calls concurrently → per-slot fallback to temp_assets or
+  synthetic gradient on any failure. Each candidate carries its variant
+  prompt + which generator produced it; surfaced to the frontend through
+  `CandidateAsset.{prompt, generator}` and stored on `GeneratedAsset`.
+- `SmartTagPopover` now enforces a 400ms minimum spinner duration so the
+  "extracting semantic features…" state is always visible, even when the
+  backend returns near-instantly (fixes prior UX gap where tags appeared
+  instantly on assets whose preview hadn't rendered).
+
+### Phase 6c — Persona panel + IP-Composer
 - Left sidebar `PersonaPanel`: "Idiosyncratic Preferences" with persona
   cards (name + tag flat-list, color-coded by dimension)
 - "Save as Persona" / "Update Persona" / "Load Persona"
 - "Asset Library" panel (also left sidebar)
 - "The Curator Panel" right sidebar w/ Version History + Final Composition
-- Backend algorithm wire-up (one at a time):
-  1. **ImageTagging** (VLM, currently mocked in `vlm_tagger_client`):
-     upload image → structured JSON of feature words per dimension.
-     Real impl uses GPT-5.4 via OPENAI_BASE_URL.
-  2. **IP-Composer integration**: forward fusion stack to localhost:12100;
-     debug CORS error path (currently FastAPI 500 on compose path masks as
-     CORS — the middleware doesn't add headers when an unhandled exception
-     short-circuits the response. Need to add a global exception handler
-     that wraps errors into 4xx/5xx with CORS headers preserved.)
-  3. **TextToImage** for initial candidates (currently mocked with the 4
-     user-uploaded placeholders). Provider TBD.
+- **IP-Composer integration** (last remaining algorithm): forward fusion
+  stack to localhost:12100. Global exception handler is already in place
+  (main.py) so 500s no longer mask as CORS errors.
 
 ## Outstanding design decisions (track here)
 

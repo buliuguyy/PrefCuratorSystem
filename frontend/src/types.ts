@@ -1,5 +1,12 @@
 // Mirrors backend/app/schemas.py — keep in sync.
 
+/**
+ * The full dimension pool the VLM is allowed to pick from. **Note**: this is
+ * a closed union for TS hinting only — the VLM may return novel dimensions
+ * (e.g. Atmosphere) which we DO render. Code that maps Dimension to colors /
+ * UI bits MUST tolerate strings outside this union via the `accentFor()`
+ * fallback in `SmartTagPopover`. See memory/prefcurator-dynamic-dimensions.md.
+ */
 export type Dimension =
   | "Color"
   | "Style"
@@ -7,14 +14,22 @@ export type Dimension =
   | "Lighting"
   | "Mood"
   | "Subject"
-  | "Composition";
+  | "Composition"
+  | "Detail"
+  | "Atmosphere";
 
+/** Hint sent to the backend. The real VLM may return a different / smaller
+ *  set based on what it judges relevant in the image. */
 export const ALL_DIMENSIONS: Dimension[] = [
   "Color",
   "Style",
   "Texture",
   "Lighting",
   "Mood",
+  "Subject",
+  "Composition",
+  "Detail",
+  "Atmosphere",
 ];
 
 /** Minimal {id,url} reference — kept for backwards-compat with code paths
@@ -152,4 +167,6 @@ export const DIMENSION_COLOR: Record<Dimension, string> = {
   Mood:        "#5dd4d8",
   Subject:     "#ef5d6f",
   Composition: "#c084fc",
+  Detail:      "#facc15",
+  Atmosphere:  "#a3a3ff",
 };

@@ -49,15 +49,30 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
     }
     let cancelled = false;
     setLoading(true);
+    // Minimum visible spinner time so the user gets a clear "extracting…"
+    // affordance even when the backend returns near-instantly (e.g. mock
+    // fallback). Without this, the popover would flash open with tags
+    // already populated and feel like nothing happened.
+    const MIN_SPINNER_MS = 400;
+    const startedAt = Date.now();
     api
       .smartTag(assetId, [...ALL_DIMENSIONS])
       .then((r) => {
         if (cancelled) return;
-        setData(r);
-        setAssetTags(assetId, r);
+        const elapsed = Date.now() - startedAt;
+        const delay = Math.max(0, MIN_SPINNER_MS - elapsed);
+        setTimeout(() => {
+          if (cancelled) return;
+          setData(r);
+          setAssetTags(assetId, r);
+          setLoading(false);
+        }, delay);
       })
-      .catch((e) => !cancelled && setError(String(e)))
-      .finally(() => !cancelled && setLoading(false));
+      .catch((e) => {
+        if (cancelled) return;
+        setError(String(e));
+        setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
