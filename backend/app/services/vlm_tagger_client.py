@@ -111,8 +111,9 @@ _DEFAULT_MOCK_DIMS = ["Color", "Style", "Texture", "Lighting", "Mood"]
 
 
 def _has_real_credentials() -> bool:
-    """True if the .env has been filled with what looks like a real API key."""
-    key = settings.openai_api_key or ""
+    """True if the .env has been filled with what looks like a real API key.
+    Reads `raw_openai_api_key` (direct-to-OpenAI key, no proxy)."""
+    key = settings.raw_openai_api_key or ""
     if not key:
         return False
     # Default placeholder from .env.example is "sk-replace-me"
@@ -211,7 +212,7 @@ async def _real_tag(image_bytes: bytes, content_type: str = "image/png") -> dict
     (`'str' object has no attribute 'choices'`). Raw httpx lets us log the
     real proxy response when things go wrong."""
     b64 = base64.b64encode(image_bytes).decode("ascii")
-    base = settings.openai_base_url.rstrip("/")
+    base = settings.raw_openai_base_url.rstrip("/")
     # Auto-append /v1 if the base URL lacks it (see prompt_expander_client).
     if not (base.endswith("/v1") or "/v1/" in base):
         base = base + "/v1"
@@ -233,10 +234,13 @@ async def _real_tag(image_bytes: bytes, content_type: str = "image/png") -> dict
     }
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Authorization": f"Bearer {settings.raw_openai_api_key}",
     }
 
-    async with httpx.AsyncClient(timeout=90.0) as client:
+    client_kwargs: dict = {"timeout": 90.0}
+    if settings.raw_openai_proxy:
+        client_kwargs["proxy"] = settings.raw_openai_proxy
+    async with httpx.AsyncClient(**client_kwargs) as client:
         r = await client.post(url, headers=headers, json=payload)
 
     if r.status_code != 200:
@@ -287,7 +291,12 @@ async def smart_tag(
                 return tags
             log.warning("VLM returned no parseable tags — falling back to mock")
         except Exception as e:
-            log.warning("VLM call failed (%s) — falling back to mock", e)
+            # Surface the real exception class + args. Bare str(e) was empty
+            # for several httpx/proxy errors, which made debugging impossible.
+            log.warning(
+                "VLM call failed (%s: %r, args=%r) — falling back to mock",
+                type(e).__name__, str(e), getattr(e, "args", ()),
+            )
     return _mock_tag(image_bytes, dimensions or _DEFAULT_MOCK_DIMS, seed_hint)
 
 

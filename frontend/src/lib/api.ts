@@ -6,6 +6,7 @@ import type {
   FusionStack,
   GeneratedAsset,
   TagResult,
+  UploadedAsset,
 } from "@/types";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_API === "1";
@@ -33,6 +34,50 @@ interface RawCandidate {
   url: string;
   prompt?: string;
   generator?: string;
+}
+
+async function streamNdjson(
+  path: string,
+  body: unknown,
+  onLine: (line: Record<string, unknown>) => void,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) {
+    const text = res.body ? await res.text() : "";
+    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      try {
+        onLine(JSON.parse(line));
+      } catch {
+        /* skip malformed line, keep streaming */
+      }
+    }
+  }
+  // flush trailing line if the stream ended without a terminating \n
+  const tail = buf.trim();
+  if (tail) {
+    try {
+      onLine(JSON.parse(tail));
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 const realApi = {
@@ -65,10 +110,30 @@ const realApi = {
     }));
     return { candidates };
   },
-  smartTag: (assetId: string, dimensions: Dimension[]) =>
+  streamCandidates: async (
+    prompt: string,
+    n: number,
+    onCandidate: (a: GeneratedAsset) => void,
+  ): Promise<void> => {
+    await streamNdjson("/api/candidates/stream", { prompt, n }, (line) => {
+      if (line.type !== "candidate") return;
+      const c = line as unknown as RawCandidate;
+      onCandidate({
+        id: c.id,
+        url: `${API_BASE}${c.url}`,
+        origin: "generated",
+        createdAt: Date.now(),
+        label: "",
+        prompt: c.prompt ?? prompt,
+        generator: c.generator ?? "backend",
+      });
+    });
+  },
+  smartTag: (assetId: string, dimensions: Dimension[], signal?: AbortSignal) =>
     jsonFetch<TagResult>("/api/tagging/smart-tag", {
       method: "POST",
       body: JSON.stringify({ asset_id: assetId, dimensions }),
+      signal,
     }),
   lasso: (
     assetId: string,
@@ -87,6 +152,27 @@ const realApi = {
       method: "POST",
       body: JSON.stringify(stack),
     }),
+  uploadAsset: async (file: File): Promise<UploadedAsset> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const r = await fetch(`${API_BASE}/api/assets/upload`, {
+      method: "POST",
+      body: fd,
+    });
+    if (!r.ok) {
+      throw new Error(`${r.status} ${r.statusText}: ${await r.text()}`);
+    }
+    const ref = (await r.json()) as { id: string; url: string };
+    return {
+      id: ref.id,
+      url: `${API_BASE}${ref.url}`,
+      origin: "uploaded",
+      createdAt: Date.now(),
+      label: "",
+      originalFilename: file.name,
+      uploadedSizeBytes: file.size,
+    };
+  },
 };
 
 /**

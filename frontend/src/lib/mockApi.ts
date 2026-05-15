@@ -22,6 +22,7 @@ import type {
   FusionStack,
   GeneratedAsset,
   TagResult,
+  UploadedAsset,
 } from "@/types";
 
 // ─── in-memory url map (for assetUrl + drawMockComposite base lookups) ─────
@@ -281,11 +282,50 @@ export const mockApi = {
     return { candidates };
   },
 
+  async streamCandidates(
+    prompt: string,
+    n: number,
+    onCandidate: (a: GeneratedAsset) => void,
+  ): Promise<void> {
+    const k = Math.max(1, Math.min(n, CANDIDATE_URLS.length));
+    for (let i = 0; i < k; i++) {
+      // Stagger so the UI gets to render each tile before the next lands —
+      // mirrors the real backend's per-Gemini-call cadence.
+      await new Promise((r) => setTimeout(r, 250));
+      const url = CANDIDATE_URLS[i];
+      const id = registerUrl(url, "cand");
+      onCandidate({
+        id,
+        url,
+        origin: "generated",
+        createdAt: Date.now(),
+        label: "",
+        prompt,
+        generator: "mock",
+      });
+    }
+  },
+
   async smartTag(
     assetId: string,
     dimensions: Dimension[],
+    signal?: AbortSignal,
   ): Promise<TagResult> {
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(resolve, 250);
+      if (signal) {
+        const onAbort = () => {
+          clearTimeout(t);
+          reject(
+            typeof DOMException !== "undefined"
+              ? new DOMException("aborted", "AbortError")
+              : new Error("aborted"),
+          );
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      }
+    });
     const tags: Partial<Record<Dimension, string[]>> = {};
     for (const d of dimensions) tags[d] = tagsFor(assetId, d);
     return { asset_id: assetId, tags };
@@ -317,6 +357,23 @@ export const mockApi = {
     return {
       cropped_asset_id: croppedId,
       tags: tags as Record<Dimension, string[]>,
+    };
+  },
+
+  async uploadAsset(file: File): Promise<UploadedAsset> {
+    // mock: turn the File into an object URL we can render straight from
+    // memory — no backend round-trip, no AssetStore on the mock side beyond
+    // the URL map.
+    const url = URL.createObjectURL(file);
+    const id = registerUrl(url, "upload");
+    return {
+      id,
+      url,
+      origin: "uploaded",
+      createdAt: Date.now(),
+      label: "",
+      originalFilename: file.name,
+      uploadedSizeBytes: file.size,
     };
   },
 

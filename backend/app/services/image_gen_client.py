@@ -166,3 +166,29 @@ async def generate_candidates(prompt: str, n: int = 4) -> list[CandidateOut]:
     tasks = [_gen_one(i, v) for i, v in enumerate(variants)]
     results = await asyncio.gather(*tasks)
     return list(results)
+
+
+async def generate_candidates_stream(prompt: str, n: int = 4):
+    """Async generator variant of generate_candidates. Yields (idx, CandidateOut)
+    pairs in the order each Gemini call FINISHES (not the variant order), so
+    the frontend can render images on the canvas as they land instead of
+    waiting for the slowest variant.
+
+    Total still equals `n`. Each fallback failure is yielded individually so
+    one slow Gemini call doesn't block earlier successes."""
+    n = max(1, min(n, 4))
+    variants = await prompt_expander_client.expand(prompt, n)
+    while len(variants) < n:
+        variants.append(prompt)
+    variants = variants[:n]
+
+    log.info("image_gen[stream]: expanded %r into %d variant(s)", prompt[:60], len(variants))
+    for i, v in enumerate(variants):
+        log.info("  variant[%d]: %s", i, v[:160])
+
+    async def _with_idx(i: int, v: str) -> tuple[int, CandidateOut]:
+        return i, await _gen_one(i, v)
+
+    tasks = [asyncio.create_task(_with_idx(i, v)) for i, v in enumerate(variants)]
+    for fut in asyncio.as_completed(tasks):
+        yield await fut

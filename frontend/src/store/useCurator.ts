@@ -3,17 +3,19 @@
 import { create } from "zustand";
 
 import { api } from "@/lib/api";
-import type {
-  Asset,
-  CanvasItem,
-  ComposedAsset,
-  Dimension,
-  FusionStack,
-  GeneratedAsset,
-  Group,
-  LassoAsset,
-  Sign,
-  TagResult,
+import {
+  ALL_DIMENSIONS,
+  type Asset,
+  type CanvasItem,
+  type ComposedAsset,
+  type Dimension,
+  type FusionStack,
+  type GeneratedAsset,
+  type Group,
+  type LassoAsset,
+  type Sign,
+  type TagResult,
+  type UploadedAsset,
 } from "@/types";
 
 /**
@@ -134,11 +136,21 @@ interface CuratorState {
   lassoMode: { sourceAssetId: string } | null;
 
   /** When non-null, SmartTagPopover opens for this asset. Driven by:
-   *   - tile click in Canvas (legacy local state, still set there)
+   *   - the "Tag" entry in the tile's right-click menu (Phase 7.9)
    *   - commitLasso after the API returns
    *   - clicking on a persisted polygon overlay
    */
   activePopoverAssetId: string | null;
+
+  /** When non-null, the PreviewOverlay shows this asset at large size.
+   *  Driven by left-click on a tile. */
+  previewAssetId: string | null;
+
+  /** Per-asset "tagging in flight" flag. Set true when pre-tag or popover
+   *  triggers a smartTag fetch; cleared on success/error. Surfaced in the
+   *  right-click menu's Tag entry as "Tagging…". Also gates the popover's
+   *  own fetch so the same asset isn't tagged twice concurrently. */
+  taggingAssets: Record<string, boolean>;
 
   // ─── mutations ──────────────────────────────────────────────────────────
   setPrompt(p: string): void;
@@ -191,6 +203,13 @@ interface CuratorState {
   cancelLasso(): void;
   commitLasso(polygonImg: [number, number][]): Promise<void>;
   setActivePopover(assetId: string | null): void;
+  setPreview(assetId: string | null): void;
+  setTagging(assetId: string, active: boolean): void;
+
+  /** Upload a local image file, register it as an `uploaded`-origin Asset
+   *  with the same lifecycle as a generated candidate (canvas tile +
+   *  background pre-tag). */
+  uploadAsset(file: File): Promise<void>;
 
   loadGalleryEntry(id: string): void;
   removeGalleryEntry(id: string): void;
@@ -237,6 +256,8 @@ export const useCurator = create<CuratorState>((set, get) => ({
 
   lassoMode: null,
   activePopoverAssetId: null,
+  previewAssetId: null,
+  taggingAssets: {},
 
   setPrompt: (p) => set({ prompt: p }),
   setLoadingCandidates: (b) => set({ loadingCandidates: b }),
@@ -433,8 +454,49 @@ export const useCurator = create<CuratorState>((set, get) => ({
     if (!state.prompt.trim()) return;
     set({ loadingCandidates: true, composeError: null });
     try {
-      const res = await api.generateCandidates(state.prompt.trim(), 4);
-      state.registerAssets(res.candidates as GeneratedAsset[]);
+      // Stream variant: each Gemini call lands one at a time, gets registered
+      // on the canvas immediately, and starts its own background pre-tag —
+      // so the user sees tiles appear progressively rather than after the
+      // slowest variant. Falls back to the batch endpoint if streaming
+      // isn't available (older mock, hypothetical proxy that buffers).
+      const prompt = state.prompt.trim();
+      // Stagger pre-tag fires so the VLM proxy isn't hit with 4 concurrent
+      // requests the instant candidates land — that triggered transient
+      // upstream errors against the nuwaflux proxy during Phase 7 testing.
+      let preTagDelay = 0;
+      const PRE_TAG_STAGGER_MS = 250;
+      const firePreTag = (assetId: string) => {
+        const delay = preTagDelay;
+        preTagDelay += PRE_TAG_STAGGER_MS;
+        setTimeout(() => {
+          const a = get().assets[assetId];
+          if (!a || a.tags || get().taggingAssets[assetId]) return;
+          get().setTagging(assetId, true);
+          api
+            .smartTag(assetId, [...ALL_DIMENSIONS])
+            .then((tagResult) => {
+              const cur = get().assets[assetId];
+              if (cur && !cur.tags) get().setAssetTags(assetId, tagResult);
+            })
+            .catch(() => {
+              /* pre-tag failures are silent — user can click to retry */
+            })
+            .finally(() => get().setTagging(assetId, false));
+        }, delay);
+      };
+
+      const stream = api.streamCandidates;
+      if (typeof stream === "function") {
+        await stream(prompt, 4, (c) => {
+          get().registerAssets([c]);
+          firePreTag(c.id);
+        });
+      } else {
+        const res = await api.generateCandidates(prompt, 4);
+        const candidates = res.candidates as GeneratedAsset[];
+        state.registerAssets(candidates);
+        for (const c of candidates) firePreTag(c.id);
+      }
     } catch (e) {
       set({ composeError: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -531,6 +593,43 @@ export const useCurator = create<CuratorState>((set, get) => ({
   cancelLasso: () => set({ lassoMode: null }),
 
   setActivePopover: (assetId) => set({ activePopoverAssetId: assetId }),
+  setPreview: (assetId) => set({ previewAssetId: assetId }),
+  setTagging: (assetId, active) =>
+    set((s) => {
+      if (!!s.taggingAssets[assetId] === active) return {};
+      const next = { ...s.taggingAssets };
+      if (active) next[assetId] = true;
+      else delete next[assetId];
+      return { taggingAssets: next };
+    }),
+
+  uploadAsset: async (file) => {
+    set({ composeError: null });
+    try {
+      const asset: UploadedAsset = await api.uploadAsset(file);
+      get().registerAssets([asset]);
+      // Mirror the generated-candidate flow: kick off a background pre-tag
+      // so right-clicking the tile shows tags instantly.
+      const taggingFire = () => {
+        const a = get().assets[asset.id];
+        if (!a || a.tags || get().taggingAssets[asset.id]) return;
+        get().setTagging(asset.id, true);
+        api
+          .smartTag(asset.id, [...ALL_DIMENSIONS])
+          .then((tagResult) => {
+            const cur = get().assets[asset.id];
+            if (cur && !cur.tags) get().setAssetTags(asset.id, tagResult);
+          })
+          .catch(() => {
+            /* silent */
+          })
+          .finally(() => get().setTagging(asset.id, false));
+      };
+      taggingFire();
+    } catch (e) {
+      set({ composeError: e instanceof Error ? e.message : String(e) });
+    }
+  },
 
   commitLasso: async (polygonImg) => {
     const state = get();

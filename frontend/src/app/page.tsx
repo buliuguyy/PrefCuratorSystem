@@ -5,6 +5,7 @@ import { Canvas } from "@/components/Canvas/Canvas";
 import { Refiner } from "@/components/Refiner/Refiner";
 import { ResultGallery } from "@/components/ResultGallery/ResultGallery";
 import { FusionStackPreview } from "@/components/FusionStackPreview/FusionStackPreview";
+import { PreviewOverlay } from "@/components/PreviewOverlay/PreviewOverlay";
 import { useCurator } from "@/store/useCurator";
 
 import styles from "./page.module.css";
@@ -22,6 +23,7 @@ export default function Home() {
         </section>
         <FusionStackPreview />
       </main>
+      <PreviewOverlay />
     </div>
   );
 }

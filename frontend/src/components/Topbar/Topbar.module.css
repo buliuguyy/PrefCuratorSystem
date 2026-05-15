@@ -75,6 +75,29 @@
   cursor: not-allowed;
 }
 
+.uploadBtn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-0);
+  font-weight: 500;
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.uploadBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(139, 92, 246, 0.08);
+}
+.uploadBtn:disabled {
+  color: #75707f;
+  cursor: not-allowed;
+}
+.hiddenFileInput {
+  display: none;
+}
+
 .right {
   display: flex;
   align-items: center;

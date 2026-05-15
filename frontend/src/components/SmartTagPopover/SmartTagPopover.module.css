@@ -1,18 +1,8 @@
-.backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(8, 8, 12, 0.55);
-  backdrop-filter: blur(2px);
-  z-index: 50;
-}
-
 .popover {
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: min(560px, 92vw);
-  max-height: 80vh;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 120px);
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -29,6 +19,12 @@
   gap: 12px;
   padding: 14px 18px 10px;
   border-bottom: 1px solid var(--border);
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+.head:active {
+  cursor: grabbing;
 }
 .title {
   font-size: 14px;

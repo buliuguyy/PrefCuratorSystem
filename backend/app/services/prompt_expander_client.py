@@ -64,7 +64,8 @@ A JSON array of exactly N strings. No prose before or after. No markdown fences.
 
 
 def _has_real_credentials() -> bool:
-    key = settings.openai_api_key or ""
+    # Direct-to-OpenAI key, no proxy.
+    key = settings.raw_openai_api_key or ""
     if not key or key.startswith("sk-replace") or len(key) < 20:
         return False
     return True
@@ -138,7 +139,7 @@ async def expand(prompt: str, n: int = 4) -> list[str]:
         log.info("prompt_expander: no real credentials — returning identity variants")
         return [user_prompt] * n
 
-    api_base = settings.openai_base_url.rstrip("/")
+    api_base = settings.raw_openai_base_url.rstrip("/")
     # Some users set OPENAI_BASE_URL without the /v1 suffix (e.g. just
     # "https://api.nuwaflux.com"). The standard OpenAI-compatible path is
     # /v1/chat/completions, so we auto-append /v1 when missing — otherwise
@@ -156,12 +157,15 @@ async def expand(prompt: str, n: int = 4) -> list[str]:
     }
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Authorization": f"Bearer {settings.raw_openai_api_key}",
     }
 
     log.info("prompt_expander: POST %s (model=%s)", url, settings.prompt_expander_model)
+    client_kwargs: dict = {"timeout": 60.0}
+    if settings.raw_openai_proxy:
+        client_kwargs["proxy"] = settings.raw_openai_proxy
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(**client_kwargs) as client:
             r = await client.post(url, headers=headers, json=payload)
     except Exception as e:
         # httpx connect / SSL / protocol errors can have empty str(e); log the

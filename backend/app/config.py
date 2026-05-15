@@ -2,13 +2,30 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    openai_api_key: str = "sk-replace-me"
-    openai_base_url: str = "https://api.openai.com/v1"
+    # Direct OpenAI credentials (no proxy). Used by the VLM smart-tag and
+    # prompt-expander calls. The nuwaflux proxy was 524/429-ing under our
+    # generate()-time concurrent burst (4 Gemini + 4 VLM); going direct
+    # against OpenAI avoids that bottleneck.
+    #
+    # IMPORTANT: every direct-OpenAI field uses the `raw_` prefix so we never
+    # accidentally inherit a `OPENAI_*` env var leaked from the user's shell
+    # (which had previously been exported to point at nuwa for other work).
+    raw_openai_api_key: str = "sk-replace-me"
+    raw_openai_base_url: str = "https://api.openai.com/v1"
+    # If non-empty, all direct-OpenAI requests tunnel through this HTTP proxy.
+    # Required when the host can't reach api.openai.com directly (e.g. the
+    # Linux box has only a local SOCKS/HTTP forward at 127.0.0.1:6152).
+    raw_openai_proxy: str = ""
+
+    # Nuwaflux proxy creds (OpenAI-compatible side). Kept around for
+    # rollback / experimentation. Not currently wired into any client.
+    nuwa_openai_api_key: str = "sk-replace-me"
+    nuwa_openai_base_url: str = "https://api.nuwaflux.com"
+
     vlm_model: str = "gpt-5.4-mini-2026-03-17"
 
-    # Prompt-expansion model: rewrites the user's prompt into N diverse variants
-    # before initial image generation. Defaults to the same VLM model since the
-    # nuwaflux proxy exposes gpt-mini under the same key.
+    # Prompt-expansion model: rewrites the user's prompt into N diverse
+    # variants before initial image generation. Defaults to the same VLM model.
     prompt_expander_model: str = "gpt-5.4-mini-2026-03-17"
 
     # Gemini (nano-banana-pro) initial image generation. The nuwaflux proxy

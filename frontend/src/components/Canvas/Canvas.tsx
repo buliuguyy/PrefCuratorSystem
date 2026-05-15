@@ -29,6 +29,23 @@ const DRAG_THRESHOLD = 4;
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 4;
 
+async function downloadAsset(asset: Asset): Promise<void> {
+  // Fetch as Blob so both backend URLs (cross-origin) and mock data URLs
+  // trigger a Save dialog with the correct content-type — direct anchor
+  // download on a cross-origin URL just navigates instead of saving.
+  const res = await fetch(asset.url);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const ext = (blob.type.split("/")[1] || "png").split(";")[0];
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = `${asset.label || asset.id}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
 interface PanDrag {
   kind: "pan";
   startX: number;
@@ -72,6 +89,8 @@ export function Canvas() {
   const lassoMode = useCurator((s) => s.lassoMode);
   const activePopoverAssetId = useCurator((s) => s.activePopoverAssetId);
   const setActivePopover = useCurator((s) => s.setActivePopover);
+  const setPreview = useCurator((s) => s.setPreview);
+  const taggingAssets = useCurator((s) => s.taggingAssets);
 
   const [ctxMenu, setCtxMenu] = useState<
     { assetId: string; clientX: number; clientY: number } | null
@@ -189,8 +208,10 @@ export function Canvas() {
 
     if (!wasDrag) {
       if (d.kind === "tile") {
-        // click on a tile (not a drag) → open Smart Tag
-        setActivePopover(d.primaryAssetId);
+        // click on a tile (not a drag) → open Preview overlay. Tagging now
+        // lives behind right-click → Tag so a stray click while a pre-tag
+        // is in flight can't race with the user's own request.
+        setPreview(d.primaryAssetId);
       } else if (d.kind === "pan") {
         // click on empty → clear selection (only if we used left button on empty)
         if (selectedAssetIds.length > 0) clearSelection();
@@ -224,14 +245,88 @@ export function Canvas() {
         setZoom(next);
         return;
       }
-      // PAN
+      // PAN — honor both axes so Mac trackpad's two-finger horizontal swipe
+      // (which delivers deltaX directly) works without modifiers. Shift+wheel
+      // still maps a vertical-only mouse wheel onto horizontal pan.
       e.preventDefault();
-      const dx = e.shiftKey ? -e.deltaY : 0;
-      const dy = e.shiftKey ? 0 : -e.deltaY;
+      let dx = -e.deltaX;
+      let dy = -e.deltaY;
+      if (e.shiftKey && Math.abs(e.deltaX) < 1) {
+        dx = -e.deltaY;
+        dy = 0;
+      }
       setPan(pan.x + dx, pan.y + dy);
     }
     node.addEventListener("wheel", onWheel, { passive: false });
     return () => node.removeEventListener("wheel", onWheel);
+  }, [pan.x, pan.y, zoom, setPan, setZoom]);
+
+  // keyboard pan / zoom — runs at window-level so the canvas doesn't need
+  // focus. Skipped when the user is typing in an input.
+  useEffect(() => {
+    function isTypingTarget(el: EventTarget | null): boolean {
+      if (!(el instanceof HTMLElement)) return false;
+      const tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+      return el.isContentEditable;
+    }
+    function zoomAt(cx: number, cy: number, factor: number) {
+      const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
+      if (next === zoom) return;
+      const wx = (cx - pan.x) / zoom;
+      const wy = (cy - pan.y) / zoom;
+      setPan(cx - wx * next, cy - wy * next);
+      setZoom(next);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (isTypingTarget(e.target)) return;
+      // ignore when a modifier other than Shift is held (Cmd-arrow / Ctrl-arrow
+      // are word-nav shortcuts in many tools; don't steal them)
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const node = viewportRef.current;
+      const step = e.shiftKey ? 120 : 40;
+      switch (e.key) {
+        case "ArrowLeft":
+          setPan(pan.x + step, pan.y);
+          e.preventDefault();
+          break;
+        case "ArrowRight":
+          setPan(pan.x - step, pan.y);
+          e.preventDefault();
+          break;
+        case "ArrowUp":
+          setPan(pan.x, pan.y + step);
+          e.preventDefault();
+          break;
+        case "ArrowDown":
+          setPan(pan.x, pan.y - step);
+          e.preventDefault();
+          break;
+        case "+":
+        case "=": {
+          if (!node) return;
+          const r = node.getBoundingClientRect();
+          zoomAt(r.width / 2, r.height / 2, 1.15);
+          e.preventDefault();
+          break;
+        }
+        case "-":
+        case "_": {
+          if (!node) return;
+          const r = node.getBoundingClientRect();
+          zoomAt(r.width / 2, r.height / 2, 1 / 1.15);
+          e.preventDefault();
+          break;
+        }
+        case "0":
+          setPan(0, 0);
+          setZoom(1);
+          e.preventDefault();
+          break;
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [pan.x, pan.y, zoom, setPan, setZoom]);
 
   // prevent browser context menu on middle / right clicks so middle-drag pan
@@ -407,7 +502,7 @@ export function Canvas() {
         </div>
 
         <div className={styles.panHint}>
-          middle-drag or Alt+drag to pan · ⌘/Ctrl+wheel to zoom · Shift-click to multi-select · click tile to smart-tag · right-click tile to lasso
+          click tile → preview · right-click tile → Tag / Lasso / Save · middle-drag · Alt+drag · ⌘/Ctrl+wheel zoom · arrows pan · +/− zoom · 0 reset · Shift-click multi-select
         </div>
 
         {selectedAssetIds.length > 0 && (
@@ -449,12 +544,44 @@ export function Canvas() {
           <button
             className={styles.ctxItem}
             onClick={() => {
+              setActivePopover(ctxMenu.assetId);
+              setCtxMenu(null);
+            }}
+          >
+            <span className={styles.ctxIcon}>◎</span>
+            {taggingAssets[ctxMenu.assetId] ? (
+              <>
+                Tagging
+                <span className={styles.dots} aria-hidden>
+                  <span className={styles.dot} />
+                  <span className={styles.dot} />
+                  <span className={styles.dot} />
+                </span>
+              </>
+            ) : (
+              <>Smart tag</>
+            )}
+          </button>
+          <button
+            className={styles.ctxItem}
+            onClick={() => {
               startLasso(ctxMenu.assetId);
               setCtxMenu(null);
             }}
           >
             <span className={styles.ctxIcon}>✂</span>
             Lasso this image
+          </button>
+          <button
+            className={styles.ctxItem}
+            onClick={() => {
+              const a = assets[ctxMenu.assetId];
+              if (a) void downloadAsset(a);
+              setCtxMenu(null);
+            }}
+          >
+            <span className={styles.ctxIcon}>⬇</span>
+            Save to local
           </button>
         </div>
       )}

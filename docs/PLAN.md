@@ -117,6 +117,68 @@ handles novel dimension names. Mock fallback preserved for offline dev.
   / nuwaflux upstream. First compose against a fresh tag may fall back
   to mock; subsequent calls hit IP-Composer's local NPY cache.
 
+### ✅ Phase 7 — UX polish + perf (post-6c)
+Bundled cleanup pass after real backends came online. Bullets below
+are individual commits so they can be reviewed / reverted in isolation.
+
+- **7.1 Smart Tag latency** — `next.config.ts` ships with
+  `reactStrictMode: true`, which double-invokes the popover's
+  effect → two VLM round-trips per open. The 400ms minimum-spinner
+  guard then masked the win when it was added in Phase 6b. Fix:
+  `AbortController` so the cancelled effect actually kills its
+  request, and drop the artificial floor to 120ms so a cache hit
+  feels instant.
+- **7.2 Floating, non-modal popover** — `SmartTagPopover` is currently
+  a center-of-screen modal with a dimmed backdrop, blocking the
+  canvas. Convert to a draggable floating panel anchored to the
+  top-right, no backdrop, so the user can pan / lasso / reorder the
+  Fusion Stack while a popover is open.
+- **7.3 Pre-tag generated candidates** — after `generate()`, fire
+  `api.smartTag` in the background for each new generated asset and
+  stash into `assets[id].tags`. Click-to-open then renders from the
+  cache, no waterfall. (Recomposed images stay click-driven per user
+  spec — they're the user's destination, not exploration material.)
+- **7.4 Per-tile download** — right-click → "Save to local" in the
+  tile context menu. Uses the asset URL via `fetch` + Blob anchor
+  trick so the filename + content-type are correct.
+- **7.5 Mac keyboard pan / zoom** — `Canvas` only listens to
+  pointer/wheel today. Add `keydown` handlers: arrow keys pan
+  (Shift = larger step), `+` / `-` / `=` zoom, `0` reset. Listener
+  guards against typing in inputs/textareas.
+- **7.6 Stream candidates one-by-one** — `/api/candidates` currently
+  awaits the full `asyncio.gather`. Add a sibling streaming route
+  `/api/candidates/stream` that emits one NDJSON line per finished
+  Gemini call; frontend reads with `fetch().body.getReader()` and
+  registers each candidate the moment it lands. Old endpoint stays
+  for the mock path.
+- **7.7 Mac trackpad horizontal pan** — wheel handler was ignoring
+  `deltaX`, so two-finger horizontal swipe did nothing. Now honors
+  both axes; `Shift+wheel` still maps vertical-only mice to horizontal
+  pan.
+- **7.8 Image upload** — `Upload` button right of the prompt input.
+  Reuses the existing `POST /api/assets/upload` endpoint; uploaded
+  files register as `origin: "uploaded"` assets that share the same
+  canvas tile + pre-tag pipeline as generated candidates (so test
+  flows don't have to repeatedly generate).
+- **7.9 Interaction redesign — preview vs. tag** — left-click on a
+  tile now opens a centered `PreviewOverlay` (large image, no controls).
+  Tag / Lasso / Save moved into the tile's right-click menu. The Tag
+  entry shows an animated "Tagging…" label while pre-tag is in flight
+  (per-asset `taggingAssets` flag in the store); clicking it still opens
+  `SmartTagPopover`, which now skips its own fetch when pre-tag has
+  the slot — eliminating the race where a user-click duplicated the
+  pre-tag's VLM request.
+- **7.10 Direct-OpenAI path + local HTTP proxy** — the nuwaflux proxy
+  was returning 524 / 429 on concurrent VLM bursts (3 of 4 pre-tag
+  calls per Generate would time out). Settings now expose
+  `raw_openai_*` fields (`api_key`, `base_url`, `proxy`) consumed by
+  the VLM + prompt-expander clients; Gemini and IP-Composer are
+  unchanged. The `raw_` prefix is deliberate — guarantees no
+  inadvertent inheritance from a stray `OPENAI_BASE_URL` env var in
+  the shell. When `RAW_OPENAI_PROXY` is set (e.g.
+  `http://127.0.0.1:6152` for our network-restricted Linux box),
+  every direct-OpenAI httpx client tunnels through it.
+
 ### Phase 6d (was Phase 6c remainder) — Persona panel + Asset library
 - Left sidebar `PersonaPanel`: "Idiosyncratic Preferences" with persona
   cards (name + tag flat-list, color-coded by dimension)
