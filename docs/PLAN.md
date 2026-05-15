@@ -179,36 +179,100 @@ are individual commits so they can be reviewed / reverted in isolation.
   `http://127.0.0.1:6152` for our network-restricted Linux box),
   every direct-OpenAI httpx client tunnels through it.
 
-### Phase 6d (was Phase 6c remainder) — Persona panel + Asset library
-- Left sidebar `PersonaPanel`: "Idiosyncratic Preferences" with persona
-  cards (name + tag flat-list, color-coded by dimension)
-- "Save as Persona" / "Update Persona" / "Load Persona"
-- "Asset Library" panel (also left sidebar)
-- "The Curator Panel" right sidebar w/ Version History + Final
-  Composition (Version History already exists as `gallery` in store —
-  needs UI surface)
+### Phase 8 — Persona panel + Asset Library + Curator panel
+(was the long-deferred "Phase 6d"; renumbered as Phase 8 now that 7 is
+in. Single biggest remaining UI surface.)
+
+**Left sidebar — `PersonaPanel` ("Idiosyncratic Preferences")**
+- Persona cards: each card = a saved `CuratedConcept[]` snapshot of the
+  stack, color-coded chips per dimension (reuse `DIMENSION_COLOR`).
+- Actions per card: Apply (replace current stack), Update (overwrite
+  from current stack), Rename, Delete. Active persona gets the accent
+  border.
+- "Save as Persona" entry at the top of the panel — pops a small name
+  prompt, stashes the current `useCurator.stack` into a new persona.
+- Storage: localStorage v0 (versioned key `prefcurator/personas/v1`,
+  JSON-serialised). Defer Redis / DB until we know the schema is stable.
+
+**Left sidebar — `AssetLibrary` (beneath PersonaPanel)**
+- Lists every Asset currently in `useCurator.assets` regardless of how
+  it landed there (generated / uploaded / lasso / composed), filterable
+  by origin.
+- Click → opens the same PreviewOverlay used by canvas tiles.
+- Right-click → same context menu (Smart tag / Lasso / Save). Reuse
+  the Canvas tile context menu component (factor it out).
+- Visual: thumbnail grid (~72×72), origin badge in the corner,
+  hover-tooltip with full label.
+
+**Right sidebar — `CuratorPanel` ("The Curator Panel")**
+- Top half: Version History (= `useCurator.gallery`). One row per
+  compose call: thumb of `resultAssetIds[selectedResultIdx]`, prompt
+  preview, "Restore" button → `loadGalleryEntry(id)`.
+- Bottom half: Final Composition pinning. Right-click on a gallery
+  entry / a canvas tile → "Pin as final" → stores `finalAssetId` in
+  the store + renders large in this slot. Distinct from version
+  history because there's exactly one "final".
+
+**Out-of-scope for Phase 8** (call out so we don't scope-creep):
+- Persona import/export (file). Defer.
+- Diff between two personas. Defer.
+- Multi-user / cloud sync. Defer.
+
+### Phase 5 — Intensity sliders → real recompose
+*Independent track, can be tackled before/after Phase 8.*
+- Slider drag (debounced 200ms) → `compose()` with adjusted alphas.
+- Same `seed` preserves overall composition so the slider feels like
+  it's moving through a continuous space, not regenerating.
+- "Mixer Group" lock UI: select multiple sliders → drag in unison
+  (preserve ratios), per the screenshot's `Locked` chip.
+- Backend already supports per-concept alpha; only the frontend
+  IntensityMixer wiring is missing.
+
+### Phase 9 (tentative) — productionization wrap-up
+*Sketch only; nail down after Phase 8 lands.*
+- Replace in-memory `AssetStore` with disk-backed cache (so a server
+  restart doesn't kill the active canvas).
+- Persona schema versioning + migration path (see open Q below).
+- Error-state UX: surface drift / weak_slots / fallback-to-mock more
+  prominently than the current banner.
+- Auth — at minimum, a per-browser session id so multiple users on
+  the same backend don't see each other's AssetStore.
 
 ## Outstanding design decisions (track here)
 
-- [ ] How does "Asset Library" relate to candidates? Are dropped/uploaded
-  images allowed in the library independent of the prompt-generated grid?
-- [x] **Resolved (Phase 4):** Lasso ROI tagging dimensions — popover renders
-  whatever dimensions the API returns (dynamic per-image, future VLM-driven).
-  Mock returns `Subject + Texture + Composition` for ROIs. Same dynamic-iter
-  pattern is also used by the full-image SmartTagPopover.
-- [ ] Mixer Group "Locked" semantics: what's the unlocked default? Each
-  slider independent, or all sliders move together by default?
-- [ ] Persona schema: persistent UUIDs vs. user-given names? Versioning?
+- [x] **Resolved (Phase 7.8):** Asset Library scope — uploaded files
+  are first-class `origin: "uploaded"` assets sharing the canvas-tile +
+  pre-tag pipeline with generated candidates. The library will simply
+  list every entry in `useCurator.assets`, filtered by origin.
+- [x] **Resolved (Phase 4):** Lasso ROI tagging dimensions — popover
+  renders whatever dimensions the API returns (dynamic per-image,
+  VLM-driven). Mock returns `Subject + Texture + Composition` for
+  ROIs. Same dynamic-iter pattern is used by the full-image popover.
+- [ ] Mixer Group "Locked" semantics (Phase 5): what's the unlocked
+  default? Each slider independent, or all sliders move together by
+  default?
+- [ ] Persona schema (Phase 8): persistent UUIDs vs. user-given
+  names? Schema version field for future migration? Snapshot the
+  source `assetId`s too, or just the `dimension/tag/sign` triples
+  (which would survive across new canvases)?
+- [ ] PersonaPanel + Phase 7.9 interaction model: right-click on a
+  persona card should do what? Apply destructively? Apply additively
+  (merge with current stack)?
+- [ ] Composed-asset tagging policy (re-confirm): pre-tag stays
+  click-driven per Phase 7.3 spec, but should there be an explicit
+  "re-tag this composed image" affordance? (Click no longer auto-tags
+  post-Phase 7.9, so this is the only path to refresh tags on a
+  composed result.)
 
 ## Naming map (screenshot terminology → code)
 
-- "Idiosyncratic Preferences" → left-sidebar `PersonaPanel` (Phase 6)
-- "Asset Library" → bottom of `PersonaPanel` (Phase 6)
-- "Smart Tagging" → `SmartTagPopover` (Phase 2)
+- "Idiosyncratic Preferences" → left-sidebar `PersonaPanel` (Phase 8)
+- "Asset Library" → left sidebar, beneath `PersonaPanel` (Phase 8)
+- "Smart Tagging" → `SmartTagPopover` (Phase 2, refactored in Phase 7.2 / 7.9)
 - "Feature Fusion Stack" / "Curator Tiles" → `FusionStackPreview` (Phase 2,
-  to be promoted to `FeatureFusionStack` panel in Phase 3 with the
+  promoted to `FeatureFusionStack` panel in Phase 3 with the
   "Result image = A_features + D_Lasso − B_style" formula header)
 - "Feature Intensity Mixer" → `IntensityMixer` (Phase 3 mocked / Phase 5
   real)
-- "The Curator Panel" with "Version History" / "Final Composition" → Phase 6
-- "Save as Persona" / "Update Persona" → Phase 6
+- "The Curator Panel" with "Version History" / "Final Composition" → Phase 8
+- "Save as Persona" / "Update Persona" → Phase 8
