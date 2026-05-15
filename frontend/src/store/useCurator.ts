@@ -44,6 +44,11 @@ export interface GalleryEntry {
   selectedResultIdx: number;
   numSamples: number;
   usedMock: boolean;
+  /** IP-Composer diagnostics — captured at compose-time so replaying a
+   *  gallery entry preserves the drift banner / weak-signal chips. */
+  drift?: number | null;
+  driftWarn?: boolean;
+  weakSlots?: string[];
 }
 
 // ─── canvas auto-layout helpers ────────────────────────────────────────────
@@ -115,6 +120,11 @@ interface CuratorState {
   resultAssetIds: string[];
   selectedResultIdx: number;
   resultUsedMock: boolean;
+  /** Diagnostics from the most recent compose call. Reset on next compose. */
+  resultDrift: number | null;
+  resultDriftWarn: boolean;
+  /** Concept.name strings — used to mark a Fusion Stack row as "weak ref". */
+  resultWeakSlots: string[];
 
   gallery: GalleryEntry[];
   activeGalleryId: string | null;
@@ -218,6 +228,9 @@ export const useCurator = create<CuratorState>((set, get) => ({
   resultAssetIds: [],
   selectedResultIdx: 0,
   resultUsedMock: false,
+  resultDrift: null,
+  resultDriftWarn: false,
+  resultWeakSlots: [],
 
   gallery: [],
   activeGalleryId: null,
@@ -472,6 +485,9 @@ export const useCurator = create<CuratorState>((set, get) => ({
       state.registerAssets(results, 12);
 
       const ids = results.map((r) => r.id);
+      const drift = res.drift ?? null;
+      const driftWarn = res.drift_warn ?? false;
+      const weakSlots = res.weak_slots ?? [];
       const entry: GalleryEntry = {
         id: galleryEntryId,
         timestamp: Date.now(),
@@ -482,6 +498,9 @@ export const useCurator = create<CuratorState>((set, get) => ({
         selectedResultIdx: 0,
         numSamples: state.numSamples,
         usedMock: res.used_mock,
+        drift,
+        driftWarn,
+        weakSlots,
       };
 
       set({
@@ -489,6 +508,9 @@ export const useCurator = create<CuratorState>((set, get) => ({
         resultAssetIds: ids,
         selectedResultIdx: 0,
         resultUsedMock: res.used_mock,
+        resultDrift: drift,
+        resultDriftWarn: driftWarn,
+        resultWeakSlots: weakSlots,
         view: "refiner",
         gallery: [entry, ...get().gallery].slice(0, 30),
         activeGalleryId: entry.id,
@@ -563,6 +585,9 @@ export const useCurator = create<CuratorState>((set, get) => ({
       resultAssetIds: entry.resultAssetIds,
       selectedResultIdx: entry.selectedResultIdx,
       resultUsedMock: entry.usedMock,
+      resultDrift: entry.drift ?? null,
+      resultDriftWarn: entry.driftWarn ?? false,
+      resultWeakSlots: entry.weakSlots ?? [],
       activeGalleryId: entry.id,
       view: "refiner",
       composeError: null,

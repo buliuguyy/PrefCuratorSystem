@@ -185,6 +185,19 @@
   margin-left: 2px;
 }
 
+.weakBadge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  background: rgba(250, 204, 21, 0.18);
+  color: #facc15;
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 2px;
+  cursor: help;
+}
+
 .reorderHint {
   font-size: 10.5px;
   color: var(--fg-1);

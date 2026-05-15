@@ -106,6 +106,27 @@
   flex-shrink: 0;
 }
 
+.driftBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(250, 204, 21, 0.08);
+  border: 1px solid rgba(250, 204, 21, 0.32);
+  color: #f6e7a3;
+  font-size: 12.5px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+.driftDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #facc15;
+  box-shadow: 0 0 8px rgba(250, 204, 21, 0.55);
+  flex-shrink: 0;
+}
+
 .canvasWrap {
   position: relative;
   flex: 1;

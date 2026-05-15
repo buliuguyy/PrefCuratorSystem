@@ -102,6 +102,15 @@ class LassoResponse(BaseModel):
 
 
 class ComposeResponse(BaseModel):
+    # `result_asset_id` is kept for any legacy caller; new code should use
+    # `result_asset_ids` (always len ≥ 1; first element matches `result_asset_id`).
     result_asset_id: str
+    result_asset_ids: list[str] = Field(default_factory=list)
     seed: int
     used_mock: bool = False
+    # IP-Composer diagnostics (None when mock or unavailable).
+    drift: float | None = None
+    drift_warn: bool = False
+    # Names (`Concept.name`) of slots whose signal_ratio < 0.10 — surfaced to
+    # the UI as a "weak reference image" hint per Fusion Stack row.
+    weak_slots: list[str] = Field(default_factory=list)

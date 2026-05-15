@@ -1,7 +1,8 @@
 """IP-Composer service client.
 
 Real implementation: forwards the FusionStack as a multipart request to
-`POST {IP_COMPOSER_URL}/compose`, expanding each Concept into one slot.
+`POST {IP_COMPOSER_URL}/compose`, expanding each Concept into one slot,
+then fetches each generated PNG via a follow-up `GET /outputs/<fn>`.
 
 Fallback: when IP-Composer is unreachable (ConnectError) we synthesize a
 "MOCK COMPOSITE" PNG that overlays the requested concept names on the base
@@ -9,7 +10,7 @@ image. The fallback is purely for unblocking UI iteration — production code
 paths should never silently swallow real composition failures, so we surface
 the fallback flag back to the caller (and ultimately to the UI).
 
-The IP-Composer protocol (per user-provided spec):
+The IP-Composer protocol (Flask app at ~/IP_Composer/app.py):
 
     POST /compose  (multipart/form-data)
       base_image: <bytes>
@@ -24,6 +25,15 @@ The IP-Composer protocol (per user-provided spec):
         "num_samples": int,
         "seed": int
       }
+    →  200 application/json {
+         "drift": float, "drift_warn": bool,
+         "slots": [{"name", "alpha", "rank", "source",
+                    "signal_ratio", "weak_signal"}, ...],
+         "num_samples": int,
+         "files": ["...png", ...],
+         "urls":  ["/outputs/...png", ...]
+       }
+    GET  /outputs/<fn>  →  PNG bytes
 """
 
 from __future__ import annotations
@@ -31,7 +41,7 @@ from __future__ import annotations
 import io
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 from PIL import Image, ImageDraw, ImageFont
@@ -45,8 +55,18 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class ComposeOutcome:
-    image_bytes: bytes
+    """Result of one /compose call.
+
+    `images` always has ≥1 entry (one PNG per requested num_samples; mock
+    fallback emits exactly one). `weak_slots` is the names of the slots whose
+    signal_ratio < 0.10 — surfaced to the UI as a "this reference image barely
+    contains the concept" hint."""
+
+    images: list[bytes]
     used_mock: bool
+    drift: float | None = None
+    drift_warn: bool = False
+    weak_slots: list[str] = field(default_factory=list)
 
 
 # ─── slot expansion ─────────────────────────────────────────────────────────
@@ -104,26 +124,74 @@ async def compose(stack: FusionStack) -> ComposeOutcome:
         }).encode(), "application/json"),
     ))
 
-    url = f"{settings.ip_composer_url.rstrip('/')}/compose"
+    base_url = settings.ip_composer_url.rstrip("/")
+    url = f"{base_url}/compose"
+    # IP-Composer runs SDXL inference for num_samples * num_inference_steps,
+    # which can take ~30s for 4 samples on a single GPU. Generous timeout.
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             resp = await client.post(url, files=multipart)
-            resp.raise_for_status()
-            ctype = resp.headers.get("content-type", "")
-            if ctype.startswith("image/"):
-                return ComposeOutcome(image_bytes=resp.content, used_mock=False)
-            # Some IP-Composer builds return JSON with a URL or base64; tolerate both.
-            data = resp.json()
-            if "image_base64" in data:
-                import base64
-                return ComposeOutcome(
-                    image_bytes=base64.b64decode(data["image_base64"]),
-                    used_mock=False,
+            if resp.status_code >= 400:
+                # Surface the real server-side error body, otherwise the
+                # broad except below swallows it and the only signal you get
+                # is "fell back to mock" with no clue why.
+                body_preview = resp.text[:500].replace("\n", " ")
+                log.warning(
+                    "IP-Composer %d on POST /compose — body: %s",
+                    resp.status_code, body_preview,
                 )
-            raise RuntimeError(f"unexpected IP-Composer response shape: {list(data)[:5]}")
+                resp.raise_for_status()
+            data = resp.json()
+            outcome = await _fetch_outputs(client, base_url, data)
+            return outcome
     except (httpx.ConnectError, httpx.ReadTimeout, httpx.HTTPStatusError, httpx.RequestError) as e:
         log.warning("IP-Composer unreachable / errored (%s) — using mock composite", e)
-        return ComposeOutcome(image_bytes=_mock_composite(stack, specs), used_mock=True)
+        return ComposeOutcome(
+            images=[_mock_composite(stack, specs)],
+            used_mock=True,
+        )
+
+
+async def _fetch_outputs(
+    client: httpx.AsyncClient, base_url: str, data: dict
+) -> ComposeOutcome:
+    """Parse the /compose JSON response and follow the per-file URLs to pull
+    the PNG bytes back."""
+    urls = data.get("urls") or []
+    files = data.get("files") or []
+    # Prefer `urls` (server-relative); fall back to constructing from `files`.
+    paths: list[str] = []
+    if urls:
+        paths = [u if u.startswith("http") else f"{base_url}{u}" for u in urls]
+    elif files:
+        paths = [f"{base_url}/outputs/{fn}" for fn in files]
+    else:
+        raise RuntimeError(
+            f"IP-Composer response missing 'urls'/'files': {sorted(data)[:8]}"
+        )
+
+    images: list[bytes] = []
+    for p in paths:
+        r = await client.get(p)
+        r.raise_for_status()
+        if not r.content:
+            raise RuntimeError(f"IP-Composer returned empty PNG at {p}")
+        images.append(r.content)
+
+    slot_diag = data.get("slots") or []
+    weak = [
+        str(s.get("name") or f"slot{i}")
+        for i, s in enumerate(slot_diag)
+        if isinstance(s, dict) and s.get("weak_signal")
+    ]
+    drift = data.get("drift")
+    return ComposeOutcome(
+        images=images,
+        used_mock=False,
+        drift=float(drift) if isinstance(drift, (int, float)) else None,
+        drift_warn=bool(data.get("drift_warn")),
+        weak_slots=weak,
+    )
 
 
 # ─── mock fallback ───────────────────────────────────────────────────────────

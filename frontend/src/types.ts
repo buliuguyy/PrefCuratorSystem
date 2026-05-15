@@ -75,6 +75,13 @@ export interface ComposeResponse {
   results?: ComposedAsset[];
   seed: number;
   used_mock: boolean;
+  /** IP-Composer embedding-drift ‖final - base‖/‖base‖. null on mock path. */
+  drift?: number | null;
+  /** drift > 0.6 — output may be off-distribution. */
+  drift_warn?: boolean;
+  /** Concept.name values for slots whose signal_ratio < 0.10 (the reference
+   *  image barely contains the concept; high alpha won't help). */
+  weak_slots?: string[];
 }
 
 // ─── Asset discriminated union ─────────────────────────────────────────────

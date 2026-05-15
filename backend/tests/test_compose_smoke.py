@@ -41,18 +41,22 @@ def test_full_pipeline_with_mock_fallback() -> None:
         assert r.headers["content-type"].startswith("image/")
         assert len(r.content) > 1000  # non-trivial PNG
 
-    # 4. smart-tag the first candidate
+    # 4. smart-tag the first candidate.
+    # The `dimensions` list is a HINT — the real VLM is free to return novel
+    # dim names and/or a superset (see prefcurator-dynamic-dimensions memory).
+    # So we only assert that every returned dim has ≥1 tag, not equality.
     r = client.post("/api/tagging/smart-tag", json={
         "asset_id": asset_ids[0],
         "dimensions": ["Color", "Style", "Mood"],
     })
     assert r.status_code == 200
     tags = r.json()["tags"]
-    assert set(tags.keys()) == {"Color", "Style", "Mood"}
+    assert isinstance(tags, dict) and len(tags) >= 1
     for v in tags.values():
         assert isinstance(v, list) and len(v) >= 1
 
-    # 5. lasso a region of the 4th candidate
+    # 5. lasso a region of the 4th candidate. Same dynamic-dim contract: don't
+    # assert equality on the returned dimensions.
     r = client.post("/api/tagging/lasso", json={
         "asset_id": asset_ids[3],
         "polygon": [[100, 100], [400, 100], [400, 400], [100, 400]],
@@ -62,7 +66,7 @@ def test_full_pipeline_with_mock_fallback() -> None:
     body = r.json()
     cropped_id = body["cropped_asset_id"]
     assert cropped_id and cropped_id != asset_ids[3]
-    assert set(body["tags"].keys()) == {"Subject", "Texture"}
+    assert isinstance(body["tags"], dict) and len(body["tags"]) >= 1
 
     # 6. compose with a fusion stack mirroring the spec image:
     #    Result = A(Color + Style + Mood) + D_lasso(Subject + Texture) - C(Style)
@@ -99,9 +103,17 @@ def test_full_pipeline_with_mock_fallback() -> None:
     r = client.post("/api/compose", json=stack)
     assert r.status_code == 200, r.text
     out = r.json()
-    # IP-Composer is not running in test env → mock fallback must trigger
+    # IP-Composer is force-redirected to unreachable → mock fallback must trigger
     assert out["used_mock"] is True
     assert out["seed"] == 420
+    # New multi-result shape: result_asset_ids always populated, len ≥ 1, and
+    # result_asset_id == result_asset_ids[0] for back-compat.
+    assert isinstance(out["result_asset_ids"], list) and len(out["result_asset_ids"]) >= 1
+    assert out["result_asset_id"] == out["result_asset_ids"][0]
+    # Diagnostic fields default to None / [] when the mock path runs.
+    assert out["drift"] is None
+    assert out["drift_warn"] is False
+    assert out["weak_slots"] == []
     result_id = out["result_asset_id"]
 
     # 7. fetch the composite back as PNG

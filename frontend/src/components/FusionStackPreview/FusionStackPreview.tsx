@@ -12,6 +12,19 @@ function accentFor(dim: string): string {
   return (DIMENSION_COLOR as Record<string, string>)[dim] ?? "#9aa0a6";
 }
 
+/** Mirror the per-concept name format that the store builds in `toFusionStack`
+ *  — this is what IP-Composer echoes back in `weak_slots`, so we use it to
+ *  pin the warn chip to the right row. Must stay in sync with useCurator.ts. */
+function conceptSlotName(
+  assetId: string,
+  dimension: string,
+  tag: string,
+): string {
+  return `${assetId.slice(0, 4)}_${dimension.toLowerCase()}_${tag
+    .slice(0, 12)
+    .replace(/\s+/g, "_")}`;
+}
+
 export function FusionStackPreview() {
   const stack = useCurator((s) => s.stack);
   const removeConcept = useCurator((s) => s.removeConcept);
@@ -23,8 +36,10 @@ export function FusionStackPreview() {
   const isComposing = useCurator((s) => s.isComposing);
   const composeError = useCurator((s) => s.composeError);
   const resultAssetIds = useCurator((s) => s.resultAssetIds);
+  const resultWeakSlots = useCurator((s) => s.resultWeakSlots);
   const view = useCurator((s) => s.view);
   const setView = useCurator((s) => s.setView);
+  const weakSlotSet = new Set(resultWeakSlots);
 
   const plusCount = stack.filter((c) => c.sign === "+").length;
   const minusCount = stack.filter((c) => c.sign === "-").length;
@@ -116,6 +131,9 @@ export function FusionStackPreview() {
           const isBase = idx === firstPositiveIdx;
           const isDragging = dragIdx === idx;
           const isHover = hoverIdx === idx && dragIdx !== null && dragIdx !== idx;
+          const isWeak = weakSlotSet.has(
+            conceptSlotName(c.assetId, c.dimension, c.tag),
+          );
           return (
             <div
               key={c.key}
@@ -191,6 +209,14 @@ export function FusionStackPreview() {
                       title="this concept's asset is the IP-Composer base image"
                     >
                       BASE
+                    </span>
+                  )}
+                  {isWeak && (
+                    <span
+                      className={styles.weakBadge}
+                      title="last compose: this reference image barely contains the concept (IP-Composer signal_ratio < 0.10) — try a different reference"
+                    >
+                      weak ref
                     </span>
                   )}
                   <span

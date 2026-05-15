@@ -19,6 +19,8 @@ export function Refiner() {
   const selectedResultIdx = useCurator((s) => s.selectedResultIdx);
   const setSelectedResultIdx = useCurator((s) => s.setSelectedResultIdx);
   const resultUsedMock = useCurator((s) => s.resultUsedMock);
+  const resultDrift = useCurator((s) => s.resultDrift);
+  const resultDriftWarn = useCurator((s) => s.resultDriftWarn);
   const isComposing = useCurator((s) => s.isComposing);
   const setView = useCurator((s) => s.setView);
   const numSamples = useCurator((s) => s.numSamples);
@@ -52,9 +54,23 @@ export function Refiner() {
         <div className={styles.mockBanner}>
           <span className={styles.mockDot} />
           <span>
-            <strong>Mock fallback</strong> — frontend-only composite. Wire the
-            real IP-Composer backend (Phase 6 algo work) to get a real
-            composition.
+            <strong>Mock fallback</strong> — IP-Composer unreachable or errored
+            (commonly: free-form concept tag triggered an LLM auto-gen failure
+            on the IP-Composer side, or the service isn&apos;t running on
+            <code>localhost:12100</code>). The composite above is a frontend
+            stand-in; backend log has the real error.
+          </span>
+        </div>
+      )}
+
+      {!resultUsedMock && resultDriftWarn && (
+        <div className={styles.driftBanner}>
+          <span className={styles.driftDot} />
+          <span>
+            <strong>High drift</strong> ({resultDrift?.toFixed(2)}) — the fused
+            embedding moved far from the base image, so the output may be
+            off-distribution. Try lowering some &alpha; values or removing a
+            slot.
           </span>
         </div>
       )}

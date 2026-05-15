@@ -58,4 +58,4 @@ app.include_router(compose.router)
 @app.get("/health")
 async def health() -> dict[str, str]:
     # `phase` is bumped per phase so the UI can render the version chip.
-    return {"status": "ok", "phase": "6a-vlm"}
+    return {"status": "ok", "phase": "6c-ipcomposer"}

@@ -22,9 +22,16 @@ async def compose(stack: FusionStack) -> ComposeResponse:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    result_asset = store.put(outcome.image_bytes)
+    if not outcome.images:
+        raise HTTPException(status_code=502, detail="IP-Composer returned 0 images")
+
+    ids = [store.put(b).id for b in outcome.images]
     return ComposeResponse(
-        result_asset_id=result_asset.id,
+        result_asset_id=ids[0],
+        result_asset_ids=ids,
         seed=stack.seed,
         used_mock=outcome.used_mock,
+        drift=outcome.drift,
+        drift_warn=outcome.drift_warn,
+        weak_slots=outcome.weak_slots,
     )

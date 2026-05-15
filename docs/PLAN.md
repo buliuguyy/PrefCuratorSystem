@@ -95,15 +95,36 @@ handles novel dimension names. Mock fallback preserved for offline dev.
   backend returns near-instantly (fixes prior UX gap where tags appeared
   instantly on assets whose preview hadn't rendered).
 
-### Phase 6c — Persona panel + IP-Composer
+### ✅ Phase 6c — IP-Composer (real)
+- `ip_composer_client.compose()` now does the full two-hop protocol with
+  the Flask IP-Composer at `localhost:12100`: multipart POST `/compose`
+  → parse JSON `{urls, files, drift, drift_warn, slots[*].signal_ratio}`
+  → follow up with `GET /outputs/<fn>` per sample to pull PNG bytes →
+  store each into AssetStore as its own asset.
+- Mock fallback retained: triggers on ConnectError, ReadTimeout, 4xx/5xx
+  or malformed response. Now also logs the IP-Composer body preview so
+  the real cause (e.g. an LLM auto-gen 500 inside IP-Composer) is
+  surfaced in backend logs, not silently swallowed.
+- `ComposeResponse` extended with `result_asset_ids: list[str]` (always
+  ≥1, supports `num_samples > 1`), `drift`, `drift_warn`, `weak_slots`.
+  `result_asset_id` is kept for back-compat = `result_asset_ids[0]`.
+- Frontend: yellow drift banner above the result when `drift > 0.6`;
+  per-row "weak ref" chip in FusionStackPreview when the concept slot's
+  `signal_ratio < 0.10` (mirroring the slot-name format from
+  `toFusionStack`).
+- Known issue (out of scope for 6c): free-form tag strings IP-Composer
+  hasn't seen trigger its LLM auto-gen path, which can 500 on rate-limit
+  / nuwaflux upstream. First compose against a fresh tag may fall back
+  to mock; subsequent calls hit IP-Composer's local NPY cache.
+
+### Phase 6d (was Phase 6c remainder) — Persona panel + Asset library
 - Left sidebar `PersonaPanel`: "Idiosyncratic Preferences" with persona
   cards (name + tag flat-list, color-coded by dimension)
 - "Save as Persona" / "Update Persona" / "Load Persona"
 - "Asset Library" panel (also left sidebar)
-- "The Curator Panel" right sidebar w/ Version History + Final Composition
-- **IP-Composer integration** (last remaining algorithm): forward fusion
-  stack to localhost:12100. Global exception handler is already in place
-  (main.py) so 500s no longer mask as CORS errors.
+- "The Curator Panel" right sidebar w/ Version History + Final
+  Composition (Version History already exists as `gallery` in store —
+  needs UI surface)
 
 ## Outstanding design decisions (track here)
 
