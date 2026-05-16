@@ -179,9 +179,53 @@ are individual commits so they can be reviewed / reverted in isolation.
   `http://127.0.0.1:6152` for our network-restricted Linux box),
   every direct-OpenAI httpx client tunnels through it.
 
-### Phase 8 — Persona panel + Asset Library + Curator panel
+### ✅ Phase 8 — Persona panel + Asset Library + Curator panel
 (was the long-deferred "Phase 6d"; renumbered as Phase 8 now that 7 is
 in. Single biggest remaining UI surface.)
+
+**Shipped.** Per-user idiosyncratic preference profile that loads and
+auto-updates as the user designs.
+
+- Backend: `backend/app/persona_store.py` + `backend/app/routes/personas.py`.
+  Disk-backed JSON under `backend/storage/{users.json, personas/<user_id>/<pid>.json}`.
+  Persona records embed source-asset bytes as base64 so applying a saved
+  persona on a fresh canvas (or after a server restart) re-hydrates the
+  AssetStore with the original ids — the existing `/api/assets/<id>`
+  endpoint then serves the bytes back unchanged. Endpoints:
+  `GET/POST/PUT/DELETE /api/users`, `POST /api/users/<id>/touch`,
+  `GET/POST/PUT/DELETE /api/users/<id>/personas[/...]`,
+  `GET /api/users/<id>/personas/<id>` (hydrates → returns metadata only).
+- Frontend: `User`, `PersonaSummary`, `PersonaFull` types + matching
+  `api.ts` / `mockApi.ts` surface. Zustand store gains
+  `users`, `currentUserId`, `personas`, `activePersonaId`,
+  `personasLoading`, `personaError`, `finalAssetId` + actions for each.
+- Topbar `UserSwitcher` chip — no-password "sign-in" by display name.
+  Last-used user id stored in `prefcurator/last-user-id/v1`; last-active
+  persona per user under `prefcurator/last-active-persona-id/v1/<uid>`.
+  Final-asset pin per user under `prefcurator/final-asset/<uid>`.
+- `PersonaPanel` (left top): active-persona banner with detach button,
+  "Save current as persona" entry, list of per-user persona cards with
+  thumbnail strip, color-coded dim/tag chips, +/- counts, seed, and
+  per-card Apply / Update / Delete.
+- `AssetLibrary` (left bottom): filterable grid (All / Gen / Upload /
+  Lasso / Result) over every asset in `useCurator.assets`. Left-click →
+  PreviewOverlay; right-click → Smart tag / Lasso / Save / Pin-as-final
+  (reuses the canvas-tile context-menu actions). Final-pinned cells get
+  a yellow border + FINAL badge.
+- `CuratorPanel` (right): Version History (the panel's top half — what
+  ResultGallery used to do, now richer) + Final Composition slot (bottom
+  half, fed by Pin-as-final from canvas / library / gallery row).
+- **"Active persona" semantic = the user's evolving design preference
+  signature.** Every successful `compose()` fires
+  `autoUpdateActivePersona()` (fire-and-forget) which overwrites the
+  persona's concepts + asset snapshots with the latest stack — so a
+  persona accumulates the user's design behavior across a session
+  rather than being a one-shot snapshot. Applying a persona makes it
+  the new active one; "Detach" stops auto-snapshotting until the user
+  applies another.
+- Layout: switched to 4 columns. PersonaPanel + AssetLibrary on the
+  left (replacing the old left-side `ResultGallery`, now deleted as
+  dead code), Canvas/Refiner center, FusionStackPreview, CuratorPanel.
 
 **Left sidebar — `PersonaPanel` ("Idiosyncratic Preferences")**
 - Persona cards: each card = a saved `CuratedConcept[]` snapshot of the
@@ -251,13 +295,18 @@ in. Single biggest remaining UI surface.)
 - [ ] Mixer Group "Locked" semantics (Phase 5): what's the unlocked
   default? Each slider independent, or all sliders move together by
   default?
-- [ ] Persona schema (Phase 8): persistent UUIDs vs. user-given
-  names? Schema version field for future migration? Snapshot the
-  source `assetId`s too, or just the `dimension/tag/sign` triples
-  (which would survive across new canvases)?
-- [ ] PersonaPanel + Phase 7.9 interaction model: right-click on a
-  persona card should do what? Apply destructively? Apply additively
-  (merge with current stack)?
+- [x] **Resolved (Phase 8):** Persona schema — UUID `id` is the stable
+  identifier, `name` is user-editable. Records snapshot **both** the
+  `dimension/tag/sign/alpha` quadruples AND the source asset bytes
+  (base64) so applying a persona always restores the original images.
+  No schema-version field yet (small surface, single in-tree consumer);
+  add when we need a v2.
+- [x] **Resolved (Phase 8):** PersonaPanel apply semantics — Apply is
+  destructive on the stack (replaces with the persona's snapshot) and
+  registers any missing referenced assets onto the canvas (existing
+  ones are left in place). Becomes the new active persona, which means
+  the next compose auto-overwrites it. Use "Save as new persona" to
+  fork, or "Detach" to stop auto-tracking.
 - [ ] Composed-asset tagging policy (re-confirm): pre-tag stays
   click-driven per Phase 7.3 spec, but should there be an explicit
   "re-tag this composed image" affordance? (Click no longer auto-tags
@@ -266,13 +315,13 @@ in. Single biggest remaining UI surface.)
 
 ## Naming map (screenshot terminology → code)
 
-- "Idiosyncratic Preferences" → left-sidebar `PersonaPanel` (Phase 8)
-- "Asset Library" → left sidebar, beneath `PersonaPanel` (Phase 8)
+- "Idiosyncratic Preferences" → left-sidebar `PersonaPanel` (Phase 8 ✅)
+- "Asset Library" → left sidebar, beneath `PersonaPanel` (Phase 8 ✅)
 - "Smart Tagging" → `SmartTagPopover` (Phase 2, refactored in Phase 7.2 / 7.9)
 - "Feature Fusion Stack" / "Curator Tiles" → `FusionStackPreview` (Phase 2,
   promoted to `FeatureFusionStack` panel in Phase 3 with the
   "Result image = A_features + D_Lasso − B_style" formula header)
 - "Feature Intensity Mixer" → `IntensityMixer` (Phase 3 mocked / Phase 5
   real)
-- "The Curator Panel" with "Version History" / "Final Composition" → Phase 8
-- "Save as Persona" / "Update Persona" → Phase 8
+- "The Curator Panel" with "Version History" / "Final Composition" → `CuratorPanel` (Phase 8 ✅)
+- "Save as Persona" / "Update Persona" → top of `PersonaPanel` + per-card buttons (Phase 8 ✅)

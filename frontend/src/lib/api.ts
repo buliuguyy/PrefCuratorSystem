@@ -5,8 +5,11 @@ import type {
   Dimension,
   FusionStack,
   GeneratedAsset,
+  PersonaFull,
+  PersonaSummary,
   TagResult,
   UploadedAsset,
+  User,
 } from "@/types";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_API === "1";
@@ -173,6 +176,65 @@ const realApi = {
       uploadedSizeBytes: file.size,
     };
   },
+
+  // ─── users + personas (Phase 8) ──────────────────────────────────────────
+  listUsers: () =>
+    jsonFetch<{ users: User[] }>("/api/users").then((r) => r.users),
+  createUser: (name: string) =>
+    jsonFetch<User>("/api/users", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  renameUser: (userId: string, name: string) =>
+    jsonFetch<User>(`/api/users/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify({ name }),
+    }),
+  deleteUser: (userId: string) =>
+    jsonFetch<{ ok: boolean }>(`/api/users/${userId}`, { method: "DELETE" }),
+  touchUser: (userId: string) =>
+    jsonFetch<{ ok: boolean }>(`/api/users/${userId}/touch`, { method: "POST" }),
+
+  listPersonas: (userId: string) =>
+    jsonFetch<{ personas: PersonaSummary[] }>(
+      `/api/users/${userId}/personas`,
+    ).then((r) => r.personas),
+  createPersona: (
+    userId: string,
+    payload: {
+      name: string;
+      concepts: PersonaFull["concepts"];
+      asset_ids: string[];
+      prompt: string;
+      seed: number;
+    },
+  ) =>
+    jsonFetch<PersonaSummary>(`/api/users/${userId}/personas`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updatePersona: (
+    userId: string,
+    personaId: string,
+    payload: {
+      name: string;
+      concepts: PersonaFull["concepts"];
+      asset_ids: string[];
+      prompt: string;
+      seed: number;
+    },
+  ) =>
+    jsonFetch<PersonaSummary>(`/api/users/${userId}/personas/${personaId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  deletePersona: (userId: string, personaId: string) =>
+    jsonFetch<{ ok: boolean }>(
+      `/api/users/${userId}/personas/${personaId}`,
+      { method: "DELETE" },
+    ),
+  getPersona: (userId: string, personaId: string) =>
+    jsonFetch<PersonaFull>(`/api/users/${userId}/personas/${personaId}`),
 };
 
 /**

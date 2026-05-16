@@ -31,7 +31,8 @@ pnpm-debug.log*
 
 # Local storage / runtime artifacts
 backend/storage/cache/
-backend/storage/personas/*.json
+backend/storage/users.json
+backend/storage/personas/**/*.json
 !backend/storage/personas/.gitkeep
 
 # Editor / OS

@@ -91,6 +91,8 @@ export function Canvas() {
   const setActivePopover = useCurator((s) => s.setActivePopover);
   const setPreview = useCurator((s) => s.setPreview);
   const taggingAssets = useCurator((s) => s.taggingAssets);
+  const finalAssetId = useCurator((s) => s.finalAssetId);
+  const setFinalAsset = useCurator((s) => s.setFinalAsset);
 
   const [ctxMenu, setCtxMenu] = useState<
     { assetId: string; clientX: number; clientY: number } | null
@@ -582,6 +584,20 @@ export function Canvas() {
           >
             <span className={styles.ctxIcon}>⬇</span>
             Save to local
+          </button>
+          <button
+            className={styles.ctxItem}
+            onClick={() => {
+              setFinalAsset(
+                finalAssetId === ctxMenu.assetId ? null : ctxMenu.assetId,
+              );
+              setCtxMenu(null);
+            }}
+          >
+            <span className={styles.ctxIcon}>★</span>
+            {finalAssetId === ctxMenu.assetId
+              ? "Unpin from final"
+              : "Pin as final"}
           </button>
         </div>
       )}

@@ -177,3 +177,54 @@ export const DIMENSION_COLOR: Record<Dimension, string> = {
   Detail:      "#facc15",
   Atmosphere:  "#a3a3ff",
 };
+
+// ─── User + Persona (Phase 8) ──────────────────────────────────────────────
+
+export interface User {
+  id: string;
+  name: string;
+  created_at: number;
+  last_seen_at: number;
+}
+
+/** Lightweight persona view used by the PersonaPanel list. Does NOT include
+ *  per-asset base64 — that lives on PersonaFull, fetched on apply. */
+export interface PersonaSummary {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: number;
+  updated_at: number;
+  last_used_at: number;
+  prompt: string;
+  seed: number;
+  concept_count: number;
+  plus_count: number;
+  minus_count: number;
+  asset_count: number;
+  concept_preview: { dimension: string; tag: string; sign: Sign }[];
+  asset_preview_ids: string[];
+}
+
+/** Full persona returned by GET /api/users/.../personas/<id>. The backend
+ *  has already hydrated the asset bytes into its in-memory AssetStore by
+ *  the time this lands, so each asset is fetchable via /api/assets/<id>. */
+export interface PersonaFull {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: number;
+  updated_at: number;
+  last_used_at: number;
+  prompt: string;
+  seed: number;
+  concepts: CuratedConceptSnapshot[];
+  assets: {
+    id: string;
+    label: string;
+    origin: AssetOrigin;
+    url: string;        // relative — frontend api.assetUrl(id) is the canonical absolute
+    tags: Partial<Record<string, string[]>> | null;
+    available: boolean; // false if hydration failed (very rare; usually a corrupt persona file)
+  }[];
+}

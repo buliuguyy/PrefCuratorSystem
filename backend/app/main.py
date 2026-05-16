@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.routes import assets, candidates, compose, tagging
+from app.routes import assets, candidates, compose, personas, tagging
 
 # Make our own log.info() calls visible alongside uvicorn's INFO output.
 # Python's root logger defaults to WARNING, which swallows the per-variant
@@ -53,9 +53,10 @@ app.include_router(candidates.router)
 app.include_router(assets.router)
 app.include_router(tagging.router)
 app.include_router(compose.router)
+app.include_router(personas.router)
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
     # `phase` is bumped per phase so the UI can render the version chip.
-    return {"status": "ok", "phase": "7-ux-polish"}
+    return {"status": "ok", "phase": "8-personas"}

@@ -21,13 +21,61 @@ import type {
   Dimension,
   FusionStack,
   GeneratedAsset,
+  PersonaFull,
+  PersonaSummary,
   TagResult,
   UploadedAsset,
+  User,
 } from "@/types";
 
 // ─── in-memory url map (for assetUrl + drawMockComposite base lookups) ─────
 
 const assetUrls = new Map<string, string>();
+
+// ─── mock user + persona store (in-memory; persists across HMR by living
+//     on module scope) ─────────────────────────────────────────────────────
+
+interface MockPersona {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: number;
+  updated_at: number;
+  last_used_at: number;
+  prompt: string;
+  seed: number;
+  concepts: PersonaFull["concepts"];
+  /** Mirrors the real backend's `assets` list. URLs are object/data URLs
+   *  from the live `assetUrls` map so they keep working as long as the
+   *  browser keeps them alive. */
+  assets: PersonaFull["assets"];
+}
+
+const mockUsers: User[] = [];
+const mockPersonas: MockPersona[] = [];
+
+function mockSummary(p: MockPersona): PersonaSummary {
+  const plus = p.concepts.filter((c) => c.sign === "+").length;
+  const minus = p.concepts.filter((c) => c.sign === "-").length;
+  return {
+    id: p.id,
+    user_id: p.user_id,
+    name: p.name,
+    created_at: p.created_at,
+    updated_at: p.updated_at,
+    last_used_at: p.last_used_at,
+    prompt: p.prompt,
+    seed: p.seed,
+    concept_count: p.concepts.length,
+    plus_count: plus,
+    minus_count: minus,
+    asset_count: p.assets.length,
+    concept_preview: p.concepts
+      .slice(0, 8)
+      .map((c) => ({ dimension: c.dimension, tag: c.tag, sign: c.sign })),
+    asset_preview_ids: p.assets.slice(0, 3).map((a) => a.id),
+  };
+}
 
 function freshId(prefix = "mock"): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 12)}`;
@@ -427,6 +475,153 @@ export const mockApi = {
       results,
       seed: stack.seed,
       used_mock: true,
+    };
+  },
+
+  // ─── users + personas (Phase 8 mock) ─────────────────────────────────────
+
+  async listUsers(): Promise<User[]> {
+    return [...mockUsers];
+  },
+  async createUser(name: string): Promise<User> {
+    const nm = name.trim();
+    const found = mockUsers.find(
+      (u) => u.name.trim().toLowerCase() === nm.toLowerCase(),
+    );
+    if (found) return found;
+    const now = Date.now() / 1000;
+    const u: User = {
+      id: freshId("u"),
+      name: nm,
+      created_at: now,
+      last_seen_at: now,
+    };
+    mockUsers.push(u);
+    return u;
+  },
+  async renameUser(userId: string, name: string): Promise<User> {
+    const u = mockUsers.find((x) => x.id === userId);
+    if (!u) throw new Error("user not found");
+    u.name = name.trim();
+    return u;
+  },
+  async deleteUser(userId: string): Promise<{ ok: boolean }> {
+    const idx = mockUsers.findIndex((u) => u.id === userId);
+    if (idx < 0) return { ok: false };
+    mockUsers.splice(idx, 1);
+    for (let i = mockPersonas.length - 1; i >= 0; i--) {
+      if (mockPersonas[i].user_id === userId) mockPersonas.splice(i, 1);
+    }
+    return { ok: true };
+  },
+  async touchUser(userId: string): Promise<{ ok: boolean }> {
+    const u = mockUsers.find((x) => x.id === userId);
+    if (u) u.last_seen_at = Date.now() / 1000;
+    return { ok: true };
+  },
+
+  async listPersonas(userId: string): Promise<PersonaSummary[]> {
+    return mockPersonas
+      .filter((p) => p.user_id === userId)
+      .sort((a, b) => b.updated_at - a.updated_at)
+      .map(mockSummary);
+  },
+  async createPersona(
+    userId: string,
+    payload: {
+      name: string;
+      concepts: PersonaFull["concepts"];
+      asset_ids: string[];
+      prompt: string;
+      seed: number;
+    },
+  ): Promise<PersonaSummary> {
+    const now = Date.now() / 1000;
+    const p: MockPersona = {
+      id: freshId("p"),
+      user_id: userId,
+      name: payload.name,
+      created_at: now,
+      updated_at: now,
+      last_used_at: now,
+      prompt: payload.prompt,
+      seed: payload.seed,
+      concepts: payload.concepts,
+      assets: payload.asset_ids
+        .filter((id) => assetUrls.has(id))
+        .map((id) => ({
+          id,
+          label: "",
+          origin: "generated" as const,
+          url: assetUrls.get(id) ?? "",
+          tags: null,
+          available: true,
+        })),
+    };
+    mockPersonas.push(p);
+    return mockSummary(p);
+  },
+  async updatePersona(
+    userId: string,
+    personaId: string,
+    payload: {
+      name: string;
+      concepts: PersonaFull["concepts"];
+      asset_ids: string[];
+      prompt: string;
+      seed: number;
+    },
+  ): Promise<PersonaSummary> {
+    const p = mockPersonas.find(
+      (x) => x.id === personaId && x.user_id === userId,
+    );
+    if (!p) throw new Error("persona not found");
+    const now = Date.now() / 1000;
+    p.name = payload.name;
+    p.prompt = payload.prompt;
+    p.seed = payload.seed;
+    p.concepts = payload.concepts;
+    p.assets = payload.asset_ids
+      .filter((id) => assetUrls.has(id))
+      .map((id) => ({
+        id,
+        label: "",
+        origin: "generated" as const,
+        url: assetUrls.get(id) ?? "",
+        tags: null,
+        available: true,
+      }));
+    p.updated_at = now;
+    p.last_used_at = now;
+    return mockSummary(p);
+  },
+  async deletePersona(
+    userId: string,
+    personaId: string,
+  ): Promise<{ ok: boolean }> {
+    const idx = mockPersonas.findIndex(
+      (x) => x.id === personaId && x.user_id === userId,
+    );
+    if (idx < 0) return { ok: false };
+    mockPersonas.splice(idx, 1);
+    return { ok: true };
+  },
+  async getPersona(userId: string, personaId: string): Promise<PersonaFull> {
+    const p = mockPersonas.find(
+      (x) => x.id === personaId && x.user_id === userId,
+    );
+    if (!p) throw new Error("persona not found");
+    return {
+      id: p.id,
+      user_id: p.user_id,
+      name: p.name,
+      created_at: p.created_at,
+      updated_at: p.updated_at,
+      last_used_at: p.last_used_at,
+      prompt: p.prompt,
+      seed: p.seed,
+      concepts: p.concepts,
+      assets: p.assets,
     };
   },
 };

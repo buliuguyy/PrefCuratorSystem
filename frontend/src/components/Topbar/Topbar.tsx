@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { useCurator } from "@/store/useCurator";
+import { getInitialUserId, useCurator } from "@/store/useCurator";
 
 import styles from "./Topbar.module.css";
+import { UserSwitcher } from "./UserSwitcher";
 
 export function Topbar() {
   const prompt = useCurator((s) => s.prompt);
@@ -13,6 +14,38 @@ export function Topbar() {
   const uploadAsset = useCurator((s) => s.uploadAsset);
   const loading = useCurator((s) => s.loadingCandidates);
   const composeError = useCurator((s) => s.composeError);
+  const refreshUsers = useCurator((s) => s.refreshUsers);
+  const setCurrentUser = useCurator((s) => s.setCurrentUser);
+  const users = useCurator((s) => s.users);
+  const currentUserId = useCurator((s) => s.currentUserId);
+
+  // Boot: pull users from backend + restore the last user this browser used.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      await refreshUsers();
+      if (!mounted) return;
+      const stored = getInitialUserId();
+      const list = useCurator.getState().users;
+      const pick =
+        stored && list.find((u) => u.id === stored)
+          ? stored
+          : list[0]?.id ?? null;
+      if (pick && useCurator.getState().currentUserId !== pick) {
+        await setCurrentUser(pick);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [refreshUsers, setCurrentUser]);
+
+  // If users list grows and we somehow have no current user, latch onto the first.
+  useEffect(() => {
+    if (!currentUserId && users.length > 0) {
+      void setCurrentUser(users[0].id);
+    }
+  }, [users, currentUserId, setCurrentUser]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -76,7 +109,8 @@ export function Topbar() {
 
       <div className={styles.right}>
         {composeError && <span className={styles.error}>{composeError}</span>}
-        <span className={styles.phaseChip}>phase 7</span>
+        <UserSwitcher />
+        <span className={styles.phaseChip}>phase 8</span>
       </div>
     </header>
   );

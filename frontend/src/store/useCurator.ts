@@ -8,15 +8,42 @@ import {
   type Asset,
   type CanvasItem,
   type ComposedAsset,
+  type CuratedConceptSnapshot,
   type Dimension,
   type FusionStack,
   type GeneratedAsset,
   type Group,
   type LassoAsset,
+  type PersonaFull,
+  type PersonaSummary,
   type Sign,
   type TagResult,
   type UploadedAsset,
+  type User,
 } from "@/types";
+
+// localStorage key for the last-active user id (no auth — just convenience).
+const LAST_USER_KEY = "prefcurator/last-user-id/v1";
+const LAST_ACTIVE_PERSONA_KEY = "prefcurator/last-active-persona-id/v1";
+const FINAL_ASSET_KEY_PREFIX = "prefcurator/final-asset/";
+
+function readLocal(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeLocal(key: string, value: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * Per-tag curated concept. Each individual tag the designer picks gets its
@@ -152,6 +179,26 @@ interface CuratorState {
    *  own fetch so the same asset isn't tagged twice concurrently. */
   taggingAssets: Record<string, boolean>;
 
+  // ─── user + persona state (Phase 8) ─────────────────────────────────────
+  /** Roster of all known users (from the backend). Refreshed by
+   *  refreshUsers(). Empty until the app first mounts. */
+  users: User[];
+  /** Currently signed-in user. Drives which personas the panel shows and
+   *  which user gets auto-updated on compose. */
+  currentUserId: string | null;
+  /** Roster of the current user's personas (lightweight summaries — full
+   *  payload loaded on apply via api.getPersona). */
+  personas: PersonaSummary[];
+  /** "Live" persona: receives an auto-overwrite at the end of each
+   *  successful compose. null = no auto-tracking. */
+  activePersonaId: string | null;
+  personasLoading: boolean;
+  personaError: string | null;
+  /** The pinned "Final Composition" — the user's chosen winner. Persisted
+   *  per-user in localStorage (key derived from current user id) so it
+   *  survives a refresh. */
+  finalAssetId: string | null;
+
   // ─── mutations ──────────────────────────────────────────────────────────
   setPrompt(p: string): void;
   setLoadingCandidates(b: boolean): void;
@@ -213,6 +260,32 @@ interface CuratorState {
 
   loadGalleryEntry(id: string): void;
   removeGalleryEntry(id: string): void;
+
+  // ─── users + personas (Phase 8) ─────────────────────────────────────────
+  /** Pull the user roster from the backend. Idempotent — safe to call on
+   *  every app mount. */
+  refreshUsers(): Promise<void>;
+  /** Create or reuse a user with this display name. */
+  createUser(name: string): Promise<User | null>;
+  /** Switch the active user. Clears canvas state + reloads personas. */
+  setCurrentUser(userId: string | null): Promise<void>;
+  renameUser(userId: string, name: string): Promise<void>;
+  deleteUser(userId: string): Promise<void>;
+  refreshPersonas(): Promise<void>;
+  /** Save the current curator state as a new persona for the current user. */
+  saveCurrentAsPersona(name: string): Promise<PersonaSummary | null>;
+  /** Overwrite an existing persona with the current state. */
+  updatePersonaFromCurrent(personaId: string): Promise<PersonaSummary | null>;
+  /** Auto-update the active persona (no-op if no current user / no active
+   *  persona / empty stack). Called at end of compose(). */
+  autoUpdateActivePersona(): Promise<void>;
+  /** Apply a persona — load its concepts + assets onto the canvas, set it
+   *  as the new active persona. */
+  applyPersona(personaId: string): Promise<void>;
+  deletePersona(personaId: string): Promise<void>;
+  detachActivePersona(): void;
+
+  setFinalAsset(assetId: string | null): void;
 }
 
 function conceptKey(
@@ -258,6 +331,14 @@ export const useCurator = create<CuratorState>((set, get) => ({
   activePopoverAssetId: null,
   previewAssetId: null,
   taggingAssets: {},
+
+  users: [],
+  currentUserId: null,
+  personas: [],
+  activePersonaId: null,
+  personasLoading: false,
+  personaError: null,
+  finalAssetId: null,
 
   setPrompt: (p) => set({ prompt: p }),
   setLoadingCandidates: (b) => set({ loadingCandidates: b }),
@@ -577,6 +658,14 @@ export const useCurator = create<CuratorState>((set, get) => ({
         gallery: [entry, ...get().gallery].slice(0, 30),
         activeGalleryId: entry.id,
       });
+
+      // Phase 8: a successful compose marks the end of one design "task".
+      // If a persona is currently active, snapshot the latest state into
+      // it so the user's evolving preference picture stays current. Fire
+      // and forget — UI doesn't block on this.
+      get().autoUpdateActivePersona().catch(() => {
+        /* personaError already populated by the action */
+      });
     } catch (e) {
       set({
         isComposing: false,
@@ -708,4 +797,325 @@ export const useCurator = create<CuratorState>((set, get) => ({
       }
       return { gallery: next };
     }),
+
+  // ─── users + personas (Phase 8) ───────────────────────────────────────────
+
+  refreshUsers: async () => {
+    try {
+      const list = await api.listUsers();
+      set({ users: list });
+    } catch (e) {
+      set({ personaError: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
+  createUser: async (name) => {
+    try {
+      const u = await api.createUser(name);
+      const cur = get().users;
+      const idx = cur.findIndex((x) => x.id === u.id);
+      const next = idx >= 0 ? cur.map((x) => (x.id === u.id ? u : x)) : [...cur, u];
+      set({ users: next });
+      return u;
+    } catch (e) {
+      set({ personaError: e instanceof Error ? e.message : String(e) });
+      return null;
+    }
+  },
+
+  setCurrentUser: async (userId) => {
+    writeLocal(LAST_USER_KEY, userId);
+    set({
+      currentUserId: userId,
+      personas: [],
+      activePersonaId: null,
+      personaError: null,
+      finalAssetId: userId
+        ? readLocal(`${FINAL_ASSET_KEY_PREFIX}${userId}`)
+        : null,
+    });
+    if (!userId) return;
+    try {
+      await api.touchUser(userId);
+    } catch {
+      /* non-fatal */
+    }
+    // Restore last-active persona for this user (per-browser convenience).
+    const lastActive = readLocal(`${LAST_ACTIVE_PERSONA_KEY}/${userId}`);
+    if (lastActive) set({ activePersonaId: lastActive });
+    await get().refreshPersonas();
+  },
+
+  renameUser: async (userId, name) => {
+    try {
+      const u = await api.renameUser(userId, name);
+      set((s) => ({
+        users: s.users.map((x) => (x.id === u.id ? u : x)),
+      }));
+    } catch (e) {
+      set({ personaError: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
+  deleteUser: async (userId) => {
+    try {
+      await api.deleteUser(userId);
+      const cur = get();
+      const remaining = cur.users.filter((u) => u.id !== userId);
+      set({ users: remaining });
+      if (cur.currentUserId === userId) {
+        // Pick another user if any, else go to null.
+        const fallback = remaining[0]?.id ?? null;
+        await get().setCurrentUser(fallback);
+      }
+    } catch (e) {
+      set({ personaError: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
+  refreshPersonas: async () => {
+    const uid = get().currentUserId;
+    if (!uid) {
+      set({ personas: [] });
+      return;
+    }
+    set({ personasLoading: true, personaError: null });
+    try {
+      const list = await api.listPersonas(uid);
+      // If the cached activePersonaId no longer exists, drop it.
+      const active = get().activePersonaId;
+      const stillActive = active && list.some((p) => p.id === active);
+      set({
+        personas: list,
+        activePersonaId: stillActive ? active : null,
+      });
+      if (!stillActive && active) {
+        writeLocal(`${LAST_ACTIVE_PERSONA_KEY}/${uid}`, null);
+      }
+    } catch (e) {
+      set({ personaError: e instanceof Error ? e.message : String(e) });
+    } finally {
+      set({ personasLoading: false });
+    }
+  },
+
+  saveCurrentAsPersona: async (name) => {
+    const s = get();
+    const uid = s.currentUserId;
+    if (!uid) {
+      set({ personaError: "Pick or create a user first." });
+      return null;
+    }
+    if (s.stack.length === 0) {
+      set({ personaError: "Add at least one tag before saving as persona." });
+      return null;
+    }
+    const payload = {
+      name,
+      prompt: s.prompt,
+      seed: s.seed,
+      concepts: s.stack.map(
+        (c): CuratedConceptSnapshot => ({
+          assetId: c.assetId,
+          dimension: c.dimension,
+          tag: c.tag,
+          sign: c.sign,
+          alpha: c.alpha,
+        }),
+      ),
+      asset_ids: [...new Set(s.stack.map((c) => c.assetId))],
+    };
+    try {
+      const created = await api.createPersona(uid, payload);
+      set((st) => ({ personas: [created, ...st.personas] }));
+      // Newly-saved persona becomes the active one — that way subsequent
+      // composes auto-update it instead of creating churn.
+      set({ activePersonaId: created.id, personaError: null });
+      writeLocal(`${LAST_ACTIVE_PERSONA_KEY}/${uid}`, created.id);
+      return created;
+    } catch (e) {
+      set({ personaError: e instanceof Error ? e.message : String(e) });
+      return null;
+    }
+  },
+
+  updatePersonaFromCurrent: async (personaId) => {
+    const s = get();
+    const uid = s.currentUserId;
+    if (!uid) return null;
+    const existing = s.personas.find((p) => p.id === personaId);
+    if (!existing) return null;
+    const payload = {
+      name: existing.name,
+      prompt: s.prompt,
+      seed: s.seed,
+      concepts: s.stack.map(
+        (c): CuratedConceptSnapshot => ({
+          assetId: c.assetId,
+          dimension: c.dimension,
+          tag: c.tag,
+          sign: c.sign,
+          alpha: c.alpha,
+        }),
+      ),
+      asset_ids: [...new Set(s.stack.map((c) => c.assetId))],
+    };
+    try {
+      const updated = await api.updatePersona(uid, personaId, payload);
+      set((st) => ({
+        personas: st.personas.map((p) => (p.id === personaId ? updated : p)),
+      }));
+      return updated;
+    } catch (e) {
+      set({ personaError: e instanceof Error ? e.message : String(e) });
+      return null;
+    }
+  },
+
+  autoUpdateActivePersona: async () => {
+    const s = get();
+    if (!s.currentUserId || !s.activePersonaId) return;
+    if (s.stack.length === 0) return;
+    await get().updatePersonaFromCurrent(s.activePersonaId);
+  },
+
+  applyPersona: async (personaId) => {
+    const s = get();
+    const uid = s.currentUserId;
+    if (!uid) return;
+    set({ personaError: null });
+    try {
+      const full: PersonaFull = await api.getPersona(uid, personaId);
+      // Build Asset records for everything the persona references. URL is
+      // derived through api.assetUrl(id) so the same code path works for
+      // mock (in-memory URL map) and real (relative /api/assets/<id> →
+      // absolute via API_BASE).
+      const restoredAssets: Asset[] = [];
+      for (const a of full.assets) {
+        if (!a.available) continue;
+        const url = api.assetUrl(a.id) || a.url;
+        const tagSlot = a.tags
+          ? { asset_id: a.id, tags: a.tags as Partial<Record<Dimension, string[]>> }
+          : undefined;
+        if (a.origin === "uploaded") {
+          restoredAssets.push({
+            id: a.id,
+            url,
+            origin: "uploaded",
+            createdAt: Date.now(),
+            label: a.label,
+            tags: tagSlot,
+            originalFilename: "(restored)",
+            uploadedSizeBytes: 0,
+          });
+        } else if (a.origin === "lasso") {
+          restoredAssets.push({
+            id: a.id,
+            url,
+            origin: "lasso",
+            createdAt: Date.now(),
+            label: a.label,
+            tags: tagSlot,
+            parentAssetId: a.id, // best-effort — we no longer have the live parent
+            polygon: [],
+          });
+        } else if (a.origin === "composed") {
+          // Personas don't normally include composed results, but tolerate
+          // any record we find.
+          restoredAssets.push({
+            id: a.id,
+            url,
+            origin: "composed",
+            createdAt: Date.now(),
+            label: a.label,
+            tags: tagSlot,
+            prompt: full.prompt,
+            galleryEntryId: "",
+            variantIdx: 0,
+            numSamples: 1,
+            seed: full.seed,
+            fusionStack: [],
+            sourceAssetIds: [],
+            usedMock: false,
+          });
+        } else {
+          // generated (default)
+          restoredAssets.push({
+            id: a.id,
+            url,
+            origin: "generated",
+            createdAt: Date.now(),
+            label: a.label,
+            tags: tagSlot,
+            prompt: full.prompt,
+            generator: "persona",
+          });
+        }
+      }
+
+      // Merge: keep existing live assets, register restored ones that aren't
+      // already present. The store's registerAssets handles auto-layout.
+      get().registerAssets(restoredAssets);
+
+      // Rebuild the curated stack from the persona snapshot.
+      const stack: CuratedConcept[] = full.concepts.map((c) => ({
+        key: `${c.assetId}|${c.dimension}|${c.tag}|${c.sign}`,
+        assetId: c.assetId,
+        dimension: c.dimension as Dimension,
+        tag: c.tag,
+        sign: c.sign,
+        alpha: c.alpha,
+      }));
+
+      set({
+        stack,
+        prompt: full.prompt || get().prompt,
+        seed: full.seed || get().seed,
+        activePersonaId: personaId,
+      });
+      writeLocal(`${LAST_ACTIVE_PERSONA_KEY}/${uid}`, personaId);
+      // Refresh listing so updated_at sorts correctly next time.
+      get().refreshPersonas();
+    } catch (e) {
+      set({ personaError: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
+  deletePersona: async (personaId) => {
+    const uid = get().currentUserId;
+    if (!uid) return;
+    try {
+      await api.deletePersona(uid, personaId);
+      set((s) => {
+        const next: Partial<CuratorState> = {
+          personas: s.personas.filter((p) => p.id !== personaId),
+        };
+        if (s.activePersonaId === personaId) {
+          next.activePersonaId = null;
+          writeLocal(`${LAST_ACTIVE_PERSONA_KEY}/${uid}`, null);
+        }
+        return next;
+      });
+    } catch (e) {
+      set({ personaError: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
+  detachActivePersona: () => {
+    const uid = get().currentUserId;
+    if (uid) writeLocal(`${LAST_ACTIVE_PERSONA_KEY}/${uid}`, null);
+    set({ activePersonaId: null });
+  },
+
+  setFinalAsset: (assetId) => {
+    const uid = get().currentUserId;
+    if (uid) writeLocal(`${FINAL_ASSET_KEY_PREFIX}${uid}`, assetId);
+    set({ finalAssetId: assetId });
+  },
 }));
+
+// Exposed so the app shell can boot the user roster + restore the last-used
+// user on mount without every component knowing about localStorage.
+export function getInitialUserId(): string | null {
+  return readLocal(LAST_USER_KEY);
+}
