@@ -41,32 +41,35 @@ def test_full_pipeline_with_mock_fallback() -> None:
         assert r.headers["content-type"].startswith("image/")
         assert len(r.content) > 1000  # non-trivial PNG
 
-    # 4. smart-tag the first candidate.
-    # The `dimensions` list is a HINT — the real VLM is free to return novel
-    # dim names and/or a superset (see prefcurator-dynamic-dimensions memory).
-    # So we only assert that every returned dim has ≥1 tag, not equality.
+    # 4. smart-tag the first candidate (Phase 9: flat ConceptTag list).
     r = client.post("/api/tagging/smart-tag", json={
         "asset_id": asset_ids[0],
-        "dimensions": ["Color", "Style", "Mood"],
     })
     assert r.status_code == 200
     tags = r.json()["tags"]
-    assert isinstance(tags, dict) and len(tags) >= 1
-    for v in tags.values():
-        assert isinstance(v, list) and len(v) >= 1
+    assert isinstance(tags, list) and len(tags) >= 1
+    for t in tags:
+        assert "concept" in t and t["concept"]
+        assert t["scope"] in ("local", "global")
+        if t["scope"] == "local":
+            assert isinstance(t["anchor"], list) and len(t["anchor"]) == 2
+        else:
+            assert t["anchor"] is None
 
-    # 5. lasso a region of the 4th candidate. Same dynamic-dim contract: don't
-    # assert equality on the returned dimensions.
+    # 5. lasso a region of the 4th candidate. Lasso has already isolated the
+    # region — every local anchor must be the crop's center (0.5, 0.5).
     r = client.post("/api/tagging/lasso", json={
         "asset_id": asset_ids[3],
         "polygon": [[100, 100], [400, 100], [400, 400], [100, 400]],
-        "dimensions": ["Subject", "Texture"],
     })
     assert r.status_code == 200
     body = r.json()
     cropped_id = body["cropped_asset_id"]
     assert cropped_id and cropped_id != asset_ids[3]
-    assert isinstance(body["tags"], dict) and len(body["tags"]) >= 1
+    assert isinstance(body["tags"], list) and len(body["tags"]) >= 1
+    for t in body["tags"]:
+        if t["scope"] == "local":
+            assert t["anchor"] == [0.5, 0.5]
 
     # 6. compose with a fusion stack mirroring the spec image:
     #    Result = A(Color + Style + Mood) + D_lasso(Subject + Texture) - C(Style)

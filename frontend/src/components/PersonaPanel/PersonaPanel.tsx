@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
 import { useCurator } from "@/store/useCurator";
-import { DIMENSION_COLOR, type Dimension } from "@/types";
+import { accentForConcept } from "@/types";
 
 import styles from "./PersonaPanel.module.css";
 
@@ -14,10 +14,6 @@ function relTime(ts: number): string {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
-}
-
-function accentFor(dim: string): string {
-  return (DIMENSION_COLOR as Record<string, string>)[dim] ?? "#888";
 }
 
 export function PersonaPanel() {
@@ -218,13 +214,17 @@ export function PersonaPanel() {
                     key={i}
                     className={styles.chip}
                     style={{
-                      borderColor: accentFor(c.dimension),
-                      color: accentFor(c.dimension),
+                      borderColor: accentForConcept(c.dimension),
+                      color: accentForConcept(c.dimension),
                     }}
-                    title={`${c.dimension} · ${c.sign}${c.tag}`}
+                    title={
+                      c.dimension === c.tag
+                        ? `${c.sign}${c.dimension}`
+                        : `${c.dimension} · ${c.sign}${c.tag}`
+                    }
                   >
                     {c.sign}
-                    {c.tag}
+                    {c.dimension === c.tag ? c.dimension : c.tag}
                   </span>
                 ))}
                 {p.concept_count > p.concept_preview.length && (

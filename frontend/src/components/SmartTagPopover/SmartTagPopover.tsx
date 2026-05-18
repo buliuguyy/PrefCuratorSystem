@@ -4,15 +4,16 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
 import { useCurator } from "@/store/useCurator";
-import {
-  ALL_DIMENSIONS,
-  DIMENSION_COLOR,
-  type Dimension,
-  type Sign,
-  type TagResult,
-} from "@/types";
+import { accentForConcept, type Sign, type TagResult } from "@/types";
 
 import styles from "./SmartTagPopover.module.css";
+
+/**
+ * Phase 9 fallback list view of the smart-tag concepts. The primary UX is
+ * the floating CanvasTagOverlay; this popover stays around as a debug /
+ * keyboard-accessible alternative (opened by right-click → "Smart tag as
+ * list"). Same data, simpler layout.
+ */
 
 interface Props {
   assetId: string;
@@ -27,12 +28,6 @@ function signFromEvent(e: React.MouseEvent): Sign {
   return e.metaKey || e.ctrlKey ? "-" : "+";
 }
 
-/** Accent color for a dimension. Falls back to a neutral when the dim doesn't
- *  match a known key (so the popover gracefully handles dynamic VLM dims). */
-function accentFor(dim: string): string {
-  return (DIMENSION_COLOR as Record<string, string>)[dim] ?? "#9aa0a6";
-}
-
 export function SmartTagPopover({ assetId, onClose }: Props) {
   const asset = useCurator((s) => s.assets[assetId]);
   const setAssetTags = useCurator((s) => s.setAssetTags);
@@ -43,18 +38,16 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
   // re-render on stack changes so selected pill states update
   useCurator((s) => s.stack);
 
-  // Render directly off the store so a background pre-tag that completes
-  // while the popover is open auto-populates the dim list.
   const data: TagResult | null = asset?.tags ?? null;
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (data) return;
-    if (isPreTagging) return; // pre-tag in flight — its result will land in asset.tags
+    if (isPreTagging) return;
     const controller = new AbortController();
     setTagging(assetId, true);
     api
-      .smartTag(assetId, [...ALL_DIMENSIONS], controller.signal)
+      .smartTag(assetId, controller.signal)
       .then((r) => {
         if (controller.signal.aborted) return;
         const cur = useCurator.getState().assets[assetId];
@@ -87,16 +80,13 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
 
-  function onTagClick(e: React.MouseEvent, dim: Dimension, tag: string) {
+  function onTagClick(e: React.MouseEvent, concept: string) {
     e.preventDefault();
     e.stopPropagation();
-    toggleTag(assetId, dim, tag, signFromEvent(e));
+    toggleTag(assetId, concept, signFromEvent(e));
   }
 
   // ─── drag state: header is a handle for repositioning ────────────────────
-  // Stored as (left, top) once the user drags; before then, anchored top-right
-  // via the default style. Position persists across asset changes within the
-  // same popover instance so re-clicking a tile doesn't snap it back.
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const dragRef = useRef<{
     startX: number;
@@ -106,7 +96,6 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
   } | null>(null);
 
   function onHeaderPointerDown(e: React.PointerEvent<HTMLElement>) {
-    // ignore drags initiated on the close button
     if ((e.target as HTMLElement).closest(`.${styles.close}`)) return;
     e.preventDefault();
     const rect = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
@@ -141,107 +130,140 @@ export function SmartTagPopover({ assetId, onClose }: Props) {
     ? { left: pos.left, top: pos.top, right: "auto" }
     : { right: DEFAULT_RIGHT, top: DEFAULT_TOP };
 
+  const tags = data?.tags ?? [];
+  const locals = tags.filter((t) => t.scope === "local");
+  const globals = tags.filter((t) => t.scope === "global");
+
   return (
     <div
       className={styles.popover}
       style={popoverStyle}
       onClick={(e) => e.stopPropagation()}
     >
-        <header
-          className={styles.head}
-          onPointerDown={onHeaderPointerDown}
-          onPointerMove={onHeaderPointerMove}
-          onPointerUp={onHeaderPointerUp}
-          onPointerCancel={onHeaderPointerUp}
+      <header
+        className={styles.head}
+        onPointerDown={onHeaderPointerDown}
+        onPointerMove={onHeaderPointerMove}
+        onPointerUp={onHeaderPointerUp}
+        onPointerCancel={onHeaderPointerUp}
+      >
+        <span className={styles.title}>
+          Smart Tagging
+          {asset && (
+            <span
+              className={`${styles.assetChip} ${
+                asset.origin === "composed" ? styles.assetChipComposed : ""
+              }`}
+            >
+              {asset.origin === "composed" ? "✦ " : ""}
+              {asset.label}
+            </span>
+          )}
+        </span>
+        <span className={styles.subtitle}>
+          click a concept to <em>like</em> · ⌘/Ctrl-click to <em>dislike</em>
+        </span>
+        <button
+          className={styles.close}
+          onClick={onClose}
+          aria-label="close"
         >
-          <span className={styles.title}>
-            Smart Tagging
-            {asset && (
-              <span
-                className={`${styles.assetChip} ${
-                  asset.origin === "composed" ? styles.assetChipComposed : ""
-                }`}
-              >
-                {asset.origin === "composed" ? "✦ " : ""}
-                {asset.label}
+          ✕
+        </button>
+      </header>
+
+      {error && <div className={styles.error}>{error}</div>}
+
+      {loading && (
+        <div className={styles.loadingRow}>
+          <span className={styles.spinner} />
+          <span>extracting concepts…</span>
+        </div>
+      )}
+
+      {data && (
+        <div className={styles.dimList}>
+          {locals.length > 0 && (
+            <div className={styles.dimRow}>
+              <span className={styles.dimChip} style={{ background: "#3a3a45" }}>
+                Local
               </span>
-            )}
-          </span>
-          <span className={styles.subtitle}>
-            click a tag to <em>like</em> · ⌘/Ctrl-click to <em>dislike</em>
-          </span>
-          <button
-            className={styles.close}
-            onClick={onClose}
-            aria-label="close"
-          >
-            ✕
-          </button>
-        </header>
+              <div className={styles.pills}>
+                {locals.map((t) => {
+                  const state = tagState(assetId, t.concept);
+                  const accent = accentForConcept(t.concept);
+                  const cls = [
+                    styles.pill,
+                    state === "+" ? styles.pillPlus : "",
+                    state === "-" ? styles.pillMinus : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+                  return (
+                    <button
+                      key={t.concept}
+                      className={cls}
+                      onClick={(e) => onTagClick(e, t.concept)}
+                      style={
+                        state === null
+                          ? { borderColor: accent, color: accent }
+                          : undefined
+                      }
+                    >
+                      {state === "+" && <span className={styles.markPlus}>✓</span>}
+                      {state === "-" && <span className={styles.markMinus}>✕</span>}
+                      <span className={styles.pillText}>{t.concept}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {globals.length > 0 && (
+            <div className={styles.dimRow}>
+              <span className={styles.dimChip} style={{ background: "#3a3a45" }}>
+                Global
+              </span>
+              <div className={styles.pills}>
+                {globals.map((t) => {
+                  const state = tagState(assetId, t.concept);
+                  const accent = accentForConcept(t.concept);
+                  const cls = [
+                    styles.pill,
+                    state === "+" ? styles.pillPlus : "",
+                    state === "-" ? styles.pillMinus : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+                  return (
+                    <button
+                      key={t.concept}
+                      className={cls}
+                      onClick={(e) => onTagClick(e, t.concept)}
+                      style={
+                        state === null
+                          ? { borderColor: accent, color: accent }
+                          : undefined
+                      }
+                    >
+                      {state === "+" && <span className={styles.markPlus}>✓</span>}
+                      {state === "-" && <span className={styles.markMinus}>✕</span>}
+                      <span className={styles.pillText}>{t.concept}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
-        {error && <div className={styles.error}>{error}</div>}
-
-        {loading && (
-          <div className={styles.loadingRow}>
-            <span className={styles.spinner} />
-            <span>extracting semantic features…</span>
-          </div>
-        )}
-
-        {data && (
-          <ul className={styles.dimList}>
-            {Object.entries(data.tags).map(([dim, tags]) => {
-              if (!tags || tags.length === 0) return null;
-              const accent = accentFor(dim);
-              return (
-                <li key={dim} className={styles.dimRow}>
-                  <span
-                    className={styles.dimChip}
-                    style={{ background: accent }}
-                  >
-                    {dim}
-                  </span>
-                  <div className={styles.pills}>
-                    {tags.map((tag) => {
-                      const state = tagState(assetId, dim as Dimension, tag);
-                      const cls = [
-                        styles.pill,
-                        state === "+" ? styles.pillPlus : "",
-                        state === "-" ? styles.pillMinus : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ");
-                      return (
-                        <button
-                          key={tag}
-                          className={cls}
-                          onClick={(e) =>
-                            onTagClick(e, dim as Dimension, tag)
-                          }
-                        >
-                          {state === "+" && (
-                            <span className={styles.markPlus}>✓</span>
-                          )}
-                          {state === "-" && (
-                            <span className={styles.markMinus}>✕</span>
-                          )}
-                          <span className={styles.pillText}>{tag}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        <footer className={styles.foot}>
-          <span className={styles.hint}>
-            drag header to move · press <kbd>Esc</kbd> to close · canvas
-            stays interactive
-          </span>
-        </footer>
-      </div>
+      <footer className={styles.foot}>
+        <span className={styles.hint}>
+          drag header to move · press <kbd>Esc</kbd> to close · canvas
+          stays interactive
+        </span>
+      </footer>
+    </div>
   );
 }

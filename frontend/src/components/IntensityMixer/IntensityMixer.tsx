@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 
 import { useCurator } from "@/store/useCurator";
 import { SamplesSelector } from "@/components/SamplesSelector/SamplesSelector";
-import { DIMENSION_COLOR } from "@/types";
+import { accentForConcept } from "@/types";
 
 import styles from "./IntensityMixer.module.css";
 
@@ -77,8 +77,12 @@ export function IntensityMixer() {
 
       <ul className={styles.sliderList}>
         {stack.map((c) => {
-          const accent = DIMENSION_COLOR[c.dimension];
-          const summary = c.tag;
+          const accent = accentForConcept(c.dimension);
+          // Phase 9: dimension == tag (both = concept name). Render just
+          // the concept chip; the trailing summary is a no-op when they
+          // match, kept around in case a legacy persona record splits
+          // them.
+          const showSummary = c.tag && c.tag !== c.dimension;
           return (
             <li key={c.key} className={styles.row}>
               <div className={styles.label}>
@@ -88,7 +92,7 @@ export function IntensityMixer() {
                 >
                   {c.dimension}
                 </span>
-                <span className={styles.summary}>{summary}</span>
+                {showSummary && <span className={styles.summary}>{c.tag}</span>}
                 <span
                   className={`${styles.signTag} ${
                     c.sign === "+" ? styles.signPlus : styles.signMinus

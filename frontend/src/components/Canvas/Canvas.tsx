@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { api } from "@/lib/api";
 import { useCurator } from "@/store/useCurator";
+import { CanvasTagOverlay } from "@/components/CanvasTagOverlay/CanvasTagOverlay";
 import { SmartTagPopover } from "@/components/SmartTagPopover/SmartTagPopover";
 import { LassoOverlay } from "@/components/LassoOverlay/LassoOverlay";
 import { PolygonOverlay } from "@/components/LassoOverlay/PolygonOverlay";
@@ -93,6 +95,30 @@ export function Canvas() {
   const taggingAssets = useCurator((s) => s.taggingAssets);
   const finalAssetId = useCurator((s) => s.finalAssetId);
   const setFinalAsset = useCurator((s) => s.setFinalAsset);
+  const setAssetTags = useCurator((s) => s.setAssetTags);
+  const setTagging = useCurator((s) => s.setTagging);
+
+  // Right-click → "Smart tag" no longer opens the popover by default —
+  // the overlay shows tags in place. We still need a way to KICK OFF a
+  // tag fetch for tiles that never got pre-tagged (e.g. uploads where
+  // pre-tag failed silently). This helper does that and is a no-op for
+  // already-tagged tiles.
+  function triggerSmartTagFor(assetId: string) {
+    const asset = useCurator.getState().assets[assetId];
+    if (!asset || asset.tags) return;
+    if (useCurator.getState().taggingAssets[assetId]) return;
+    setTagging(assetId, true);
+    api
+      .smartTag(assetId)
+      .then((r) => {
+        const cur = useCurator.getState().assets[assetId];
+        if (cur && !cur.tags) setAssetTags(assetId, r);
+      })
+      .catch(() => {
+        /* silent — user can retry by right-click → Show as list */
+      })
+      .finally(() => setTagging(assetId, false));
+  }
 
   const [ctxMenu, setCtxMenu] = useState<
     { assetId: string; clientX: number; clientY: number } | null
@@ -454,6 +480,23 @@ export function Canvas() {
               />
             );
           })}
+          {/* Phase 9: floating concept-tag pills, anchored to each tile.
+              Stays inside .world so it pans/zooms with the canvas; the
+              overlay itself counter-scales each pill so they remain a
+              constant pixel size on screen. */}
+          {items.map((it) => {
+            const a = assets[it.assetId];
+            if (!a) return null;
+            return (
+              <CanvasTagOverlay
+                key={`tags-${it.assetId}`}
+                item={it}
+                asset={a}
+                zoom={zoom}
+                onOpenList={(id) => setActivePopover(id)}
+              />
+            );
+          })}
         </div>
 
         <div className={styles.zoomChip}>
@@ -546,9 +589,10 @@ export function Canvas() {
           <button
             className={styles.ctxItem}
             onClick={() => {
-              setActivePopover(ctxMenu.assetId);
+              triggerSmartTagFor(ctxMenu.assetId);
               setCtxMenu(null);
             }}
+            title="Run smart-tag on this image — concept pills will float on the tile"
           >
             <span className={styles.ctxIcon}>◎</span>
             {taggingAssets[ctxMenu.assetId] ? (
@@ -560,9 +604,22 @@ export function Canvas() {
                   <span className={styles.dot} />
                 </span>
               </>
+            ) : assets[ctxMenu.assetId]?.tags ? (
+              <>Re-tag</>
             ) : (
               <>Smart tag</>
             )}
+          </button>
+          <button
+            className={styles.ctxItem}
+            onClick={() => {
+              setActivePopover(ctxMenu.assetId);
+              setCtxMenu(null);
+            }}
+            title="Open the legacy popover list view of this image's concepts"
+          >
+            <span className={styles.ctxIcon}>≡</span>
+            Show as list
           </button>
           <button
             className={styles.ctxItem}

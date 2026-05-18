@@ -1,36 +1,24 @@
 // Mirrors backend/app/schemas.py — keep in sync.
 
 /**
- * The full dimension pool the VLM is allowed to pick from. **Note**: this is
- * a closed union for TS hinting only — the VLM may return novel dimensions
- * (e.g. Atmosphere) which we DO render. Code that maps Dimension to colors /
- * UI bits MUST tolerate strings outside this union via the `accentFor()`
- * fallback in `SmartTagPopover`. See memory/prefcurator-dynamic-dimensions.md.
+ * One coarse, IP-Composer-aligned concept extracted from an image by the
+ * smart-tagging VLM. Each ConceptTag corresponds to ONE selectable handle
+ * on the canvas overlay; clicking it appends/removes a CuratedConcept on
+ * the fusion stack.
+ *
+ * - scope="local": anchor is `[x, y]` in [0,1]^2 (origin top-left).
+ *   The frontend floats this pill at `imageOrigin + anchor * imageSize`,
+ *   inverse-scaled so the pill stays a constant pixel size regardless of
+ *   canvas zoom.
+ * - scope="global": anchor is null. Concepts like lighting / style / mood
+ *   that have no specific image location — rendered as edge chips on top
+ *   of the image instead of anchored pins.
  */
-export type Dimension =
-  | "Color"
-  | "Style"
-  | "Texture"
-  | "Lighting"
-  | "Mood"
-  | "Subject"
-  | "Composition"
-  | "Detail"
-  | "Atmosphere";
-
-/** Hint sent to the backend. The real VLM may return a different / smaller
- *  set based on what it judges relevant in the image. */
-export const ALL_DIMENSIONS: Dimension[] = [
-  "Color",
-  "Style",
-  "Texture",
-  "Lighting",
-  "Mood",
-  "Subject",
-  "Composition",
-  "Detail",
-  "Atmosphere",
-];
+export interface ConceptTag {
+  concept: string;
+  scope: "local" | "global";
+  anchor: [number, number] | null;
+}
 
 /** Minimal {id,url} reference — kept for backwards-compat with code paths
  *  that don't need full Asset metadata (e.g., gallery entry source refs). */
@@ -39,8 +27,15 @@ export interface AssetRef {
   url: string;
 }
 
-export interface Concept {
-  dimension: Dimension;
+/**
+ * One slot fed into the FusionStack POST body. `dimension` carries the
+ * coarse concept name (e.g. "dog", "lighting"); `tags` is a 1-element list
+ * with the same string (the backend's ip_composer_client joins it with
+ * ", " to form the slot's concept prompt). Kept as a 1-element list for
+ * wire compatibility with the existing backend shape.
+ */
+export interface FusionStackConcept {
+  dimension: string;
   tags: string[];
   alpha: number;
   name: string;
@@ -51,7 +46,7 @@ export type Sign = "+" | "-";
 export interface Group {
   asset_id: string;
   sign: Sign;
-  concepts: Concept[];
+  concepts: FusionStackConcept[];
 }
 
 export interface FusionStack {
@@ -63,24 +58,17 @@ export interface FusionStack {
 
 export interface TagResult {
   asset_id: string;
-  tags: Partial<Record<Dimension, string[]>>;
+  tags: ConceptTag[];
 }
 
 export interface ComposeResponse {
-  /** Back-compat: single result id (Phase 1 backend). */
   result_asset_id: string;
-  /** Multi-result list (mock + future backend). When present, preferred. */
   result_asset_ids?: string[];
-  /** Full Asset metadata for each result (mock returns these inline). */
   results?: ComposedAsset[];
   seed: number;
   used_mock: boolean;
-  /** IP-Composer embedding-drift ‖final - base‖/‖base‖. null on mock path. */
   drift?: number | null;
-  /** drift > 0.6 — output may be off-distribution. */
   drift_warn?: boolean;
-  /** Concept.name values for slots whose signal_ratio < 0.10 (the reference
-   *  image barely contains the concept; high alpha won't help). */
   weak_slots?: string[];
 }
 
@@ -98,7 +86,8 @@ interface AssetCommon {
   /** Lazily populated by Smart Tagging. */
   tags?: TagResult;
   /** Captured on first <img onLoad>; used by lasso layer to convert
-   *  stage-pixel polygons → image-pixel polygons. */
+   *  stage-pixel polygons → image-pixel polygons, and by the floating
+   *  tag overlay to map normalized anchors → tile-relative pixels. */
   originalW?: number;
   originalH?: number;
 }
@@ -140,14 +129,19 @@ export type Asset =
   | UploadedAsset;
 
 /**
- * Lightweight snapshot of CuratedConcept stored on ComposedAsset — same shape
- * but without the live store key. Declared here to avoid a circular import
- * from the store file. Per-tag granularity: each curated tag is its own
- * concept (own alpha / own intensity slider).
+ * Snapshot of a CuratedConcept stored on ComposedAsset / persisted in a
+ * persona. With Phase 9 the smart-tagging granularity collapsed (each
+ * clicked tag IS one IP-Composer concept), so `dimension` and `tag`
+ * hold the SAME string — the canonical concept name. The two-field
+ * shape is preserved for wire compatibility with the persona route's
+ * existing JSON contract.
  */
 export interface CuratedConceptSnapshot {
   assetId: string;
-  dimension: Dimension;
+  /** Canonical concept name, e.g. "dog", "lighting". */
+  dimension: string;
+  /** Mirrors `dimension` after Phase 9. Older records may carry a
+   *  distinct sub-keyword. */
   tag: string;
   sign: Sign;
   alpha: number;
@@ -164,19 +158,58 @@ export interface CanvasItem {
   z: number;
 }
 
-// ─── dimension accent colors ───────────────────────────────────────────────
+// ─── concept accent colors ─────────────────────────────────────────────────
 
-export const DIMENSION_COLOR: Record<Dimension, string> = {
-  Color:       "#5b8def",
-  Style:       "#f5a45d",
-  Texture:     "#e25cc7",
-  Lighting:    "#7bd88f",
-  Mood:        "#5dd4d8",
-  Subject:     "#ef5d6f",
-  Composition: "#c084fc",
-  Detail:      "#facc15",
-  Atmosphere:  "#a3a3ff",
+/**
+ * Coarse-grained accent palette keyed by canonical concept name. Falls
+ * back to a neutral via `accentForConcept()` when the VLM emits a novel
+ * concept outside this map (per the dynamic-dimensions memory).
+ */
+export const CONCEPT_COLOR: Record<string, string> = {
+  // people / subjects
+  person: "#ef5d6f",
+  face: "#ef5d6f",
+  outfit: "#f5a45d",
+  pose: "#c084fc",
+  expression: "#facc15",
+  // animals
+  dog: "#7bd88f",
+  cat: "#7bd88f",
+  bird: "#7bd88f",
+  horse: "#7bd88f",
+  animal: "#7bd88f",
+  // objects / plants
+  object: "#5b8def",
+  subject: "#5b8def",
+  vehicle: "#5b8def",
+  building: "#5b8def",
+  flower: "#ff8fb3",
+  fruit: "#ff8fb3",
+  food: "#ff8fb3",
+  tree: "#7bd88f",
+  plant: "#7bd88f",
+  // surfaces
+  fur: "#e25cc7",
+  pattern: "#e25cc7",
+  material: "#e25cc7",
+  texture: "#e25cc7",
+  // scene / globals
+  scene: "#5dd4d8",
+  background: "#5dd4d8",
+  layout: "#5dd4d8",
+  lighting: "#facc15",
+  "time of day": "#facc15",
+  color: "#5b8def",
+  "color palette": "#5b8def",
+  style: "#a3a3ff",
+  mood: "#a3a3ff",
+  atmosphere: "#a3a3ff",
+  composition: "#c084fc",
 };
+
+export function accentForConcept(concept: string): string {
+  return CONCEPT_COLOR[concept] ?? "#9aa0a6";
+}
 
 // ─── User + Persona (Phase 8) ──────────────────────────────────────────────
 
@@ -187,8 +220,7 @@ export interface User {
   last_seen_at: number;
 }
 
-/** Lightweight persona view used by the PersonaPanel list. Does NOT include
- *  per-asset base64 — that lives on PersonaFull, fetched on apply. */
+/** Lightweight persona view used by the PersonaPanel list. */
 export interface PersonaSummary {
   id: string;
   user_id: string;
@@ -202,13 +234,13 @@ export interface PersonaSummary {
   plus_count: number;
   minus_count: number;
   asset_count: number;
+  /** Tiny preview chips for the panel list. After Phase 9, `dimension`
+   *  and `tag` are usually the same string (the concept name). */
   concept_preview: { dimension: string; tag: string; sign: Sign }[];
   asset_preview_ids: string[];
 }
 
-/** Full persona returned by GET /api/users/.../personas/<id>. The backend
- *  has already hydrated the asset bytes into its in-memory AssetStore by
- *  the time this lands, so each asset is fetchable via /api/assets/<id>. */
+/** Full persona returned by GET /api/users/.../personas/<id>. */
 export interface PersonaFull {
   id: string;
   user_id: string;
@@ -223,8 +255,11 @@ export interface PersonaFull {
     id: string;
     label: string;
     origin: AssetOrigin;
-    url: string;        // relative — frontend api.assetUrl(id) is the canonical absolute
-    tags: Partial<Record<string, string[]>> | null;
-    available: boolean; // false if hydration failed (very rare; usually a corrupt persona file)
+    url: string;
+    /** Phase 9: the new ConceptTag list shape. Older records persisted
+     *  before Phase 9 store the legacy dim-keyword map here — those are
+     *  treated as missing (null) on read; users can re-tag. */
+    tags: ConceptTag[] | null;
+    available: boolean;
   }[];
 }

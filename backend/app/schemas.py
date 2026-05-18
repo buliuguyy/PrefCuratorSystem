@@ -5,25 +5,37 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-# ─── shared primitives ─────────────────────────────────────────────────────────
+# ─── smart tag result (Phase 9) ────────────────────────────────────────────
 
-# The 9-dim pool the VLM is allowed to pick from. Kept as a Literal so the
-# frontend → backend hint is type-checked. Note: VLM responses MAY include
-# novel dimension names; those flow back via TagResult.tags whose key type
-# is intentionally `str` (not Dimension) to tolerate that.
-Dimension = Literal[
-    "Color", "Style", "Texture", "Lighting", "Mood",
-    "Subject", "Composition", "Detail", "Atmosphere",
-]
+
+class ConceptTag(BaseModel):
+    """One coarse, IP-Composer-aligned concept extracted from an image, with
+    an optional anchor on the image for floating-pill placement.
+
+    - scope="local": anchor MUST be (x, y) in [0,1]^2
+    - scope="global": anchor MUST be None (concepts like lighting / style /
+      mood that have no specific image location — frontend pins these to
+      the image's edge as chips)
+    """
+
+    concept: str
+    scope: Literal["local", "global"]
+    anchor: tuple[float, float] | None = None
+
+
+# ─── fusion stack (unchanged shape; consumed by ip_composer_client) ────────
 
 
 class Concept(BaseModel):
-    """One semantic concept extracted from one image — maps to one IP-Composer slot."""
+    """One slot fed into IP-Composer. `dimension` carries the coarse concept
+    name (e.g. "dog", "lighting") — same string as ConceptTag.concept that
+    the user picked. `tags` is a single-element list with the same value;
+    ip_composer_client joins it with ", " to form the slot's concept prompt."""
 
-    dimension: str  # tolerates any dim string the VLM returns
+    dimension: str
     tags: list[str] = Field(min_length=1)
-    alpha: float = 1.0  # frontend always sends positive; sign comes from group
-    name: str  # short id e.g. "A_color"
+    alpha: float = 1.0
+    name: str
 
 
 class Group(BaseModel):
@@ -35,8 +47,6 @@ class Group(BaseModel):
 
 
 class FusionStack(BaseModel):
-    """Full composition request from the Feature Fusion Stack panel."""
-
     base_asset_id: str
     groups: list[Group] = Field(min_length=1)
     num_samples: int = 1
@@ -57,10 +67,6 @@ class AssetRef(BaseModel):
 
 
 class CandidateAsset(BaseModel):
-    """Candidate produced by the initial image generation pipeline. Includes
-    the variant prompt the LLM expanded to (so the frontend can surface it)
-    and which generator actually produced the bytes."""
-
     id: str
     url: str
     prompt: str
@@ -73,44 +79,32 @@ class CandidateResponse(BaseModel):
 
 class SmartTagRequest(BaseModel):
     asset_id: str
-    # Hint to the VLM. With a real VLM, this is ignored — the model picks its
-    # own subset from its prompt's 9-dim pool.
-    dimensions: list[Dimension] = [
-        "Color", "Style", "Texture", "Lighting", "Mood",
-        "Subject", "Composition", "Detail", "Atmosphere",
-    ]
 
 
 class TagResult(BaseModel):
-    """Per-dimension suggested tags for an asset. The `tags` key type is str
-    (not Dimension) so a VLM that emits e.g. "Background" doesn't fail
-    validation."""
+    """Smart-tag output: a flat list of ConceptTag (Phase 9). The legacy
+    per-dimension keyword-list shape is gone — each tag IS a single
+    IP-Composer concept the user can fuse with."""
 
     asset_id: str
-    tags: dict[str, list[str]]
+    tags: list[ConceptTag]
 
 
 class LassoRequest(BaseModel):
     asset_id: str
     polygon: list[tuple[float, float]] = Field(min_length=3)
-    dimensions: list[Dimension] = ["Subject", "Texture", "Composition"]
 
 
 class LassoResponse(BaseModel):
     cropped_asset_id: str
-    tags: dict[str, list[str]]
+    tags: list[ConceptTag]
 
 
 class ComposeResponse(BaseModel):
-    # `result_asset_id` is kept for any legacy caller; new code should use
-    # `result_asset_ids` (always len ≥ 1; first element matches `result_asset_id`).
     result_asset_id: str
     result_asset_ids: list[str] = Field(default_factory=list)
     seed: int
     used_mock: bool = False
-    # IP-Composer diagnostics (None when mock or unavailable).
     drift: float | None = None
     drift_warn: bool = False
-    # Names (`Concept.name`) of slots whose signal_ratio < 0.10 — surfaced to
-    # the UI as a "weak reference image" hint per Fusion Stack row.
     weak_slots: list[str] = Field(default_factory=list)

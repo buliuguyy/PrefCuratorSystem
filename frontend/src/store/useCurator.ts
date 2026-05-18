@@ -4,12 +4,10 @@ import { create } from "zustand";
 
 import { api } from "@/lib/api";
 import {
-  ALL_DIMENSIONS,
   type Asset,
   type CanvasItem,
   type ComposedAsset,
   type CuratedConceptSnapshot,
-  type Dimension,
   type FusionStack,
   type GeneratedAsset,
   type Group,
@@ -46,16 +44,19 @@ function writeLocal(key: string, value: string | null): void {
 }
 
 /**
- * Per-tag curated concept. Each individual tag the designer picks gets its
- * OWN entry in the stack — its own alpha, its own slider in the Intensity
- * Mixer, its own row in the Fusion Stack panel. Concepts are grouped by
- * (assetId, sign) only at compose time when building the FusionStack.
+ * One curated concept in the fusion stack. After Phase 9 each click on a
+ * smart-tag (which IS a coarse IP-Composer concept like "dog" or "lighting")
+ * creates one of these. `dimension` and `tag` both carry the concept name —
+ * two fields kept around for wire compatibility with the existing persona
+ * route + IP-Composer slot snapshot shape.
  */
 export interface CuratedConcept {
-  /** `${assetId}|${dimension}|${tag}|${sign}` — globally unique. */
+  /** `${assetId}|${concept}|${sign}` — globally unique. */
   key: string;
   assetId: string;
-  dimension: Dimension;
+  /** Canonical concept name, e.g. "dog", "lighting". Mirrored to `tag`. */
+  dimension: string;
+  /** Mirrors `dimension`. */
   tag: string;
   sign: Sign;
   alpha: number;
@@ -221,17 +222,13 @@ interface CuratorState {
   setSelectedAssetIds(ids: string[]): void;
   clearSelection(): void;
 
-  toggleTag(
-    assetId: string,
-    dimension: Dimension,
-    tag: string,
-    sign: Sign,
-  ): void;
-  tagState(
-    assetId: string,
-    dimension: Dimension,
-    tag: string,
-  ): Sign | null;
+  /** Toggle a coarse concept (e.g. "dog", "lighting") for an asset onto the
+   *  fusion stack. Click same concept + same sign → remove. Click same
+   *  concept + opposite sign → flip. */
+  toggleTag(assetId: string, concept: string, sign: Sign): void;
+  /** Returns the current curated sign for this (asset, concept) pair, or
+   *  null if it isn't in the stack. */
+  tagState(assetId: string, concept: string): Sign | null;
   removeConcept(key: string): void;
   clearStack(): void;
   updateAlpha(key: string, alpha: number): void;
@@ -288,13 +285,8 @@ interface CuratorState {
   setFinalAsset(assetId: string | null): void;
 }
 
-function conceptKey(
-  assetId: string,
-  dimension: Dimension,
-  tag: string,
-  sign: Sign,
-): string {
-  return `${assetId}|${dimension}|${tag}|${sign}`;
+function conceptKey(assetId: string, concept: string, sign: Sign): string {
+  return `${assetId}|${concept}|${sign}`;
 }
 
 function cloneStack(stack: CuratedConcept[]): CuratedConcept[] {
@@ -435,39 +427,35 @@ export const useCurator = create<CuratorState>((set, get) => ({
   setSelectedAssetIds: (ids) => set({ selectedAssetIds: ids }),
   clearSelection: () => set({ selectedAssetIds: [] }),
 
-  tagState: (assetId, dimension, tag) => {
+  tagState: (assetId, concept) => {
     const { stack } = get();
     for (const c of stack) {
-      if (
-        c.assetId === assetId &&
-        c.dimension === dimension &&
-        c.tag === tag
-      ) {
+      if (c.assetId === assetId && c.dimension === concept) {
         return c.sign;
       }
     }
     return null;
   },
 
-  toggleTag: (assetId, dimension, tag, sign) =>
+  toggleTag: (assetId, concept, sign) =>
     set((s) => {
-      const targetKey = conceptKey(assetId, dimension, tag, sign);
-      const otherKey = conceptKey(
-        assetId,
-        dimension,
-        tag,
-        sign === "+" ? "-" : "+",
-      );
+      const targetKey = conceptKey(assetId, concept, sign);
+      const otherKey = conceptKey(assetId, concept, sign === "+" ? "-" : "+");
       const inTarget = s.stack.some((c) => c.key === targetKey);
-      // toggle off if same sign clicked again
       if (inTarget) {
         return { stack: s.stack.filter((c) => c.key !== targetKey) };
       }
-      // strip from other-sign group + append new
       return {
         stack: [
           ...s.stack.filter((c) => c.key !== otherKey),
-          { key: targetKey, assetId, dimension, tag, sign, alpha: 1.0 },
+          {
+            key: targetKey,
+            assetId,
+            dimension: concept,
+            tag: concept,
+            sign,
+            alpha: 1.0,
+          },
         ],
       };
     }),
@@ -510,8 +498,9 @@ export const useCurator = create<CuratorState>((set, get) => ({
         dimension: c.dimension,
         tags: [c.tag],
         alpha: c.alpha,
-        name: `${c.assetId.slice(0, 4)}_${c.dimension.toLowerCase()}_${c.tag
-          .slice(0, 12)
+        name: `${c.assetId.slice(0, 4)}_${c.dimension
+          .toLowerCase()
+          .slice(0, 16)
           .replace(/\s+/g, "_")}`,
       });
     }
@@ -554,7 +543,7 @@ export const useCurator = create<CuratorState>((set, get) => ({
           if (!a || a.tags || get().taggingAssets[assetId]) return;
           get().setTagging(assetId, true);
           api
-            .smartTag(assetId, [...ALL_DIMENSIONS])
+            .smartTag(assetId)
             .then((tagResult) => {
               const cur = get().assets[assetId];
               if (cur && !cur.tags) get().setAssetTags(assetId, tagResult);
@@ -704,7 +693,7 @@ export const useCurator = create<CuratorState>((set, get) => ({
         if (!a || a.tags || get().taggingAssets[asset.id]) return;
         get().setTagging(asset.id, true);
         api
-          .smartTag(asset.id, [...ALL_DIMENSIONS])
+          .smartTag(asset.id)
           .then((tagResult) => {
             const cur = get().assets[asset.id];
             if (cur && !cur.tags) get().setAssetTags(asset.id, tagResult);
@@ -733,11 +722,7 @@ export const useCurator = create<CuratorState>((set, get) => ({
     set({ lassoMode: null });
 
     try {
-      const res = await api.lasso(
-        parent.id,
-        polygonImg,
-        [] as never as Dimension[],
-      );
+      const res = await api.lasso(parent.id, polygonImg);
 
       const lassoAsset: LassoAsset = {
         id: res.cropped_asset_id,
@@ -752,7 +737,7 @@ export const useCurator = create<CuratorState>((set, get) => ({
 
       const tagResult: TagResult = {
         asset_id: lassoAsset.id,
-        tags: res.tags as Partial<Record<Dimension, string[]>>,
+        tags: res.tags,
       };
       get().setAssetTags(lassoAsset.id, tagResult);
       set({ activePopoverAssetId: lassoAsset.id });
@@ -994,8 +979,12 @@ export const useCurator = create<CuratorState>((set, get) => ({
       for (const a of full.assets) {
         if (!a.available) continue;
         const url = api.assetUrl(a.id) || a.url;
-        const tagSlot = a.tags
-          ? { asset_id: a.id, tags: a.tags as Partial<Record<Dimension, string[]>> }
+        // Persona-restored tags are already in the new ConceptTag[] shape on
+        // disk (Phase 9). Older personas saved before Phase 9 stored a
+        // legacy dim-keyword map — the backend now serializes those as null
+        // so we just drop them here; the user can re-tag.
+        const tagSlot = Array.isArray(a.tags)
+          ? { asset_id: a.id, tags: a.tags }
           : undefined;
         if (a.origin === "uploaded") {
           restoredAssets.push({
@@ -1057,15 +1046,20 @@ export const useCurator = create<CuratorState>((set, get) => ({
       // already present. The store's registerAssets handles auto-layout.
       get().registerAssets(restoredAssets);
 
-      // Rebuild the curated stack from the persona snapshot.
-      const stack: CuratedConcept[] = full.concepts.map((c) => ({
-        key: `${c.assetId}|${c.dimension}|${c.tag}|${c.sign}`,
-        assetId: c.assetId,
-        dimension: c.dimension as Dimension,
-        tag: c.tag,
-        sign: c.sign,
-        alpha: c.alpha,
-      }));
+      // Rebuild the curated stack from the persona snapshot. Phase 9
+      // collapsed dimension+tag onto a single concept name; on disk both
+      // fields are usually equal — coerce to the new conceptKey format.
+      const stack: CuratedConcept[] = full.concepts.map((c) => {
+        const concept = c.dimension || c.tag;
+        return {
+          key: conceptKey(c.assetId, concept, c.sign),
+          assetId: c.assetId,
+          dimension: concept,
+          tag: concept,
+          sign: c.sign,
+          alpha: c.alpha,
+        };
+      });
 
       set({
         stack,

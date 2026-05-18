@@ -4,24 +4,17 @@ import { useState } from "react";
 
 import { useCurator } from "@/store/useCurator";
 import { SamplesSelector } from "@/components/SamplesSelector/SamplesSelector";
-import { DIMENSION_COLOR, type Dimension } from "@/types";
+import { accentForConcept } from "@/types";
 
 import styles from "./FusionStackPreview.module.css";
-
-function accentFor(dim: string): string {
-  return (DIMENSION_COLOR as Record<string, string>)[dim] ?? "#9aa0a6";
-}
 
 /** Mirror the per-concept name format that the store builds in `toFusionStack`
  *  — this is what IP-Composer echoes back in `weak_slots`, so we use it to
  *  pin the warn chip to the right row. Must stay in sync with useCurator.ts. */
-function conceptSlotName(
-  assetId: string,
-  dimension: string,
-  tag: string,
-): string {
-  return `${assetId.slice(0, 4)}_${dimension.toLowerCase()}_${tag
-    .slice(0, 12)
+function conceptSlotName(assetId: string, dimension: string): string {
+  return `${assetId.slice(0, 4)}_${dimension
+    .toLowerCase()
+    .slice(0, 16)
     .replace(/\s+/g, "_")}`;
 }
 
@@ -123,7 +116,7 @@ export function FusionStackPreview() {
         )}
 
         {stack.map((c, idx) => {
-          const accent = accentFor(c.dimension as Dimension | string);
+          const accent = accentForConcept(c.dimension);
           const asset = assets[c.assetId];
           const label = asset?.label ?? "?";
           const isComposed = asset?.origin === "composed";
@@ -131,9 +124,10 @@ export function FusionStackPreview() {
           const isBase = idx === firstPositiveIdx;
           const isDragging = dragIdx === idx;
           const isHover = hoverIdx === idx && dragIdx !== null && dragIdx !== idx;
-          const isWeak = weakSlotSet.has(
-            conceptSlotName(c.assetId, c.dimension, c.tag),
-          );
+          const isWeak = weakSlotSet.has(conceptSlotName(c.assetId, c.dimension));
+          // Phase 9: dimension == tag (concept name). Only render the
+          // sub-line if a legacy persona snapshot still has them split.
+          const showSubLine = c.tag && c.tag !== c.dimension;
           return (
             <div
               key={c.key}
@@ -227,7 +221,7 @@ export function FusionStackPreview() {
                     {c.sign === "+" ? "+" : "−"}
                   </span>
                 </div>
-                <div className={styles.tags}>{c.tag}</div>
+                {showSubLine && <div className={styles.tags}>{c.tag}</div>}
               </div>
               <button
                 className={styles.removeBtn}

@@ -2,7 +2,7 @@ import { mockApi } from "@/lib/mockApi";
 import type {
   AssetRef,
   ComposeResponse,
-  Dimension,
+  ConceptTag,
   FusionStack,
   GeneratedAsset,
   PersonaFull,
@@ -132,22 +132,18 @@ const realApi = {
       });
     });
   },
-  smartTag: (assetId: string, dimensions: Dimension[], signal?: AbortSignal) =>
+  smartTag: (assetId: string, signal?: AbortSignal) =>
     jsonFetch<TagResult>("/api/tagging/smart-tag", {
       method: "POST",
-      body: JSON.stringify({ asset_id: assetId, dimensions }),
+      body: JSON.stringify({ asset_id: assetId }),
       signal,
     }),
-  lasso: (
-    assetId: string,
-    polygon: [number, number][],
-    dimensions: Dimension[],
-  ) =>
-    jsonFetch<{ cropped_asset_id: string; tags: Record<Dimension, string[]> }>(
+  lasso: (assetId: string, polygon: [number, number][]) =>
+    jsonFetch<{ cropped_asset_id: string; tags: ConceptTag[] }>(
       "/api/tagging/lasso",
       {
         method: "POST",
-        body: JSON.stringify({ asset_id: assetId, polygon, dimensions }),
+        body: JSON.stringify({ asset_id: assetId, polygon }),
       },
     ),
   compose: (stack: FusionStack) =>

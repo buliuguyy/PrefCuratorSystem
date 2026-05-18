@@ -1,0 +1,90 @@
+/* Floating concept pills layered on top of a canvas tile. Pills live
+   INSIDE the .world transform (so they follow the image when the canvas
+   pans / a tile is dragged), but each pill's own transform applies
+   scale(1/zoom) so it stays a constant pixel size on screen regardless
+   of canvas zoom.
+
+   z-index is intentionally very high so a tile that's been raised to the
+   top of the stacking order (by click → raiseCanvasItem) cannot cover
+   the pills. */
+
+.pill {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1.5px solid var(--accent, #9aa0a6);
+  color: #fff;
+  background: rgba(20, 20, 28, 0.86);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  transform-origin: center center;
+  user-select: none;
+  pointer-events: auto;
+  z-index: 1000;
+  transition: filter 0.15s ease, box-shadow 0.15s ease;
+}
+.pill:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+}
+.pill:active {
+  filter: brightness(0.92);
+}
+.pillPlus {
+  background: rgba(124, 207, 130, 0.92);
+  color: #0c1a0d;
+  border-color: #4caf50;
+}
+.pillMinus {
+  background: rgba(239, 93, 111, 0.92);
+  color: #1a0a0c;
+  border-color: #d23a52;
+}
+
+/* Tiny colored marker shown UNDER a local-scope pill so the user can
+   still see exactly which point on the image the concept refers to. */
+.dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent, #9aa0a6);
+  border: 2px solid rgba(20, 20, 28, 0.92);
+  box-shadow: 0 0 0 1.5px var(--accent, #9aa0a6),
+              0 2px 6px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  transform-origin: center center;
+  z-index: 999;
+}
+
+.lod {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(20, 20, 28, 0.92);
+  border: 1.5px solid #f5a45d;
+  color: #f5a45d;
+  cursor: pointer;
+  user-select: none;
+  pointer-events: auto;
+  transform-origin: top right;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  z-index: 1001;
+}
+.lod:hover {
+  filter: brightness(1.15);
+}

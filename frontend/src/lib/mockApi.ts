@@ -8,17 +8,14 @@
  * caring. Returns plausible data, draws a client-side canvas composite for
  * compose() results, and registers fake asset ids in an in-memory map so
  * `assetUrl(id)` keeps working.
- *
- * Returns full Asset objects from generateCandidates / compose so the zustand
- * store can register them directly without round-tripping metadata.
  */
 
 import type {
   AssetRef,
   ComposeResponse,
   ComposedAsset,
+  ConceptTag,
   CuratedConceptSnapshot,
-  Dimension,
   FusionStack,
   GeneratedAsset,
   PersonaFull,
@@ -28,12 +25,11 @@ import type {
   User,
 } from "@/types";
 
-// ─── in-memory url map (for assetUrl + drawMockComposite base lookups) ─────
+// ─── in-memory url map ─────────────────────────────────────────────────────
 
 const assetUrls = new Map<string, string>();
 
-// ─── mock user + persona store (in-memory; persists across HMR by living
-//     on module scope) ─────────────────────────────────────────────────────
+// ─── mock user + persona store ─────────────────────────────────────────────
 
 interface MockPersona {
   id: string;
@@ -45,9 +41,6 @@ interface MockPersona {
   prompt: string;
   seed: number;
   concepts: PersonaFull["concepts"];
-  /** Mirrors the real backend's `assets` list. URLs are object/data URLs
-   *  from the live `assetUrls` map so they keep working as long as the
-   *  browser keeps them alive. */
   assets: PersonaFull["assets"];
 }
 
@@ -87,7 +80,7 @@ function registerUrl(url: string, prefix = "mock"): string {
   return id;
 }
 
-// ─── fixed sample images (served by Next from /public/mock-assets) ─────────
+// ─── fixed sample images ───────────────────────────────────────────────────
 
 const CANDIDATE_URLS = [
   "/mock-assets/1.png",
@@ -96,64 +89,36 @@ const CANDIDATE_URLS = [
   "/mock-assets/4.png",
 ];
 
-// ─── tag pools per dimension ───────────────────────────────────────────────
+// ─── mock concept sets (Phase 9: coarse, anchored) ─────────────────────────
 
-const TAG_POOLS: Record<Dimension, string[][]> = {
-  Color: [
-    ["warm", "glowing", "amber"],
-    ["cool", "moonlit", "blue-tinted"],
-    ["pastel", "soft pink", "cream"],
-    ["fiery", "sunset orange", "ember"],
+const MOCK_CONCEPT_SETS: ConceptTag[][] = [
+  [
+    { concept: "dog", scope: "local", anchor: [0.5, 0.6] },
+    { concept: "scene", scope: "local", anchor: [0.5, 0.2] },
+    { concept: "lighting", scope: "global", anchor: null },
   ],
-  Style: [
-    ["fantasy", "magical realism", "painterly illustration"],
-    ["gothic", "moody oil paint", "low-light cinematic"],
-    ["pixel art", "cartoon", "classic video game"],
-    ["dreamy concept art", "matte painting"],
+  [
+    { concept: "object", scope: "local", anchor: [0.5, 0.55] },
+    { concept: "pattern", scope: "local", anchor: [0.3, 0.5] },
+    { concept: "color palette", scope: "global", anchor: null },
   ],
-  Texture: [
-    ["rough wood", "thatched", "weathered stone"],
-    ["smooth marble", "polished granite"],
-    ["flat shaded", "low-res pixel"],
-    ["billowy", "fluffy", "painterly texture"],
+  [
+    { concept: "person", scope: "local", anchor: [0.5, 0.5] },
+    { concept: "outfit", scope: "local", anchor: [0.5, 0.72] },
+    { concept: "expression", scope: "local", anchor: [0.5, 0.3] },
+    { concept: "mood", scope: "global", anchor: null },
   ],
-  Lighting: [
-    ["warm candlelight", "fairy-lit", "lantern glow"],
-    ["dim moonlight", "rim lighting"],
-    ["bright daylight", "even diffuse"],
-    ["sunset", "golden hour", "fiery backlighting"],
+  [
+    { concept: "flower", scope: "local", anchor: [0.45, 0.55] },
+    { concept: "color palette", scope: "global", anchor: null },
+    { concept: "lighting", scope: "global", anchor: null },
   ],
-  Mood: [
-    ["mystical", "spooky", "Halloween", "dreamy twilight"],
-    ["austere", "lonely", "haunted"],
-    ["cheerful", "whimsical", "playful"],
-    ["serene", "majestic", "dreamlike"],
+  [
+    { concept: "vehicle", scope: "local", anchor: [0.5, 0.55] },
+    { concept: "scene", scope: "local", anchor: [0.5, 0.3] },
+    { concept: "style", scope: "global", anchor: null },
   ],
-  Subject: [
-    ["witch's cottage", "twisted tree"],
-    ["empty corridor", "fireplace"],
-    ["Victorian house", "porch swing"],
-    ["cloud formations", "stone dome"],
-  ],
-  Composition: [
-    ["centered subject", "low horizon"],
-    ["one-point perspective", "leading lines"],
-    ["isometric", "flat front view"],
-    ["floating in clouds", "high horizon"],
-  ],
-  Detail: [
-    ["carved wood trim", "intricate fretwork"],
-    ["frayed canvas edges", "weathered brass"],
-    ["clean vector outlines", "sharp corners"],
-    ["luminous mist trails", "glittering specks"],
-  ],
-  Atmosphere: [
-    ["smoky", "dusk-veiled", "candlelit"],
-    ["crisp morning", "alpine clear"],
-    ["sun-drenched", "playful summer"],
-    ["dreamlike haze", "soft ethereal glow"],
-  ],
-};
+];
 
 function hash(s: string): number {
   let h = 2166136261 >>> 0;
@@ -164,9 +129,15 @@ function hash(s: string): number {
   return h >>> 0;
 }
 
-function tagsFor(assetId: string, dimension: Dimension): string[] {
-  const pool = TAG_POOLS[dimension];
-  return pool[hash(`${assetId}:${dimension}`) % pool.length];
+function tagsFor(assetId: string): ConceptTag[] {
+  const set = MOCK_CONCEPT_SETS[hash(assetId) % MOCK_CONCEPT_SETS.length];
+  // return a deep copy so the caller can mutate anchors without bleeding
+  // into the next call
+  return set.map((t) => ({
+    concept: t.concept,
+    scope: t.scope,
+    anchor: t.anchor ? ([t.anchor[0], t.anchor[1]] as [number, number]) : null,
+  }));
 }
 
 // ─── canvas composite renderer ─────────────────────────────────────────────
@@ -203,7 +174,6 @@ async function drawMockComposite(
   const dh = baseImg.height * scale;
   ctx.drawImage(baseImg, (W - dw) / 2, (H - dh) / 2, dw, dh);
 
-  // Tint each variant with a different hue so they're visually distinct.
   const hue = variantTotal > 1 ? (variantIdx / variantTotal) * 360 : 280;
   ctx.fillStyle = `hsla(${hue}, 60%, 18%, 0.55)`;
   ctx.fillRect(0, 0, W, H);
@@ -257,7 +227,6 @@ async function drawMockLassoCrop(
   if (polygon.length < 3) throw new Error("mock: polygon needs ≥3 vertices");
   const img = await loadImage(sourceUrl);
 
-  // bounding box in image-pixel coords (clamped + padded slightly to match backend)
   const xs = polygon.map((p) => p[0]);
   const ys = polygon.map((p) => p[1]);
   const x0 = Math.max(0, Math.floor(Math.min(...xs)) - 4);
@@ -273,12 +242,9 @@ async function drawMockLassoCrop(
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("mock: 2d context unavailable");
 
-  // fill with neutral gray so areas outside the polygon look identical to the
-  // real backend's behavior
   ctx.fillStyle = "rgb(128,128,128)";
   ctx.fillRect(0, 0, cw, ch);
 
-  // clip to polygon (translated into the crop's local space)
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(polygon[0][0] - x0, polygon[0][1] - y0);
@@ -287,7 +253,6 @@ async function drawMockLassoCrop(
   }
   ctx.closePath();
   ctx.clip();
-  // draw the source positioned so (x0,y0) lands at (0,0)
   ctx.drawImage(img, -x0, -y0);
   ctx.restore();
 
@@ -322,7 +287,7 @@ export const mockApi = {
         url,
         origin: "generated",
         createdAt: Date.now(),
-        label: "", // store assigns based on origin count
+        label: "",
         prompt,
         generator: "mock",
       });
@@ -337,8 +302,6 @@ export const mockApi = {
   ): Promise<void> {
     const k = Math.max(1, Math.min(n, CANDIDATE_URLS.length));
     for (let i = 0; i < k; i++) {
-      // Stagger so the UI gets to render each tile before the next lands —
-      // mirrors the real backend's per-Gemini-call cadence.
       await new Promise((r) => setTimeout(r, 250));
       const url = CANDIDATE_URLS[i];
       const id = registerUrl(url, "cand");
@@ -354,11 +317,7 @@ export const mockApi = {
     }
   },
 
-  async smartTag(
-    assetId: string,
-    dimensions: Dimension[],
-    signal?: AbortSignal,
-  ): Promise<TagResult> {
+  async smartTag(assetId: string, signal?: AbortSignal): Promise<TagResult> {
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(resolve, 250);
       if (signal) {
@@ -374,44 +333,28 @@ export const mockApi = {
         else signal.addEventListener("abort", onAbort, { once: true });
       }
     });
-    const tags: Partial<Record<Dimension, string[]>> = {};
-    for (const d of dimensions) tags[d] = tagsFor(assetId, d);
-    return { asset_id: assetId, tags };
+    return { asset_id: assetId, tags: tagsFor(assetId) };
   },
 
   async lasso(
     assetId: string,
     polygon: [number, number][],
-    _dimensions: Dimension[],
-  ): Promise<{ cropped_asset_id: string; tags: Record<Dimension, string[]> }> {
+  ): Promise<{ cropped_asset_id: string; tags: ConceptTag[] }> {
     await new Promise((r) => setTimeout(r, 300));
     const sourceUrl = assetUrls.get(assetId);
     if (!sourceUrl) throw new Error(`mock: asset not found ${assetId}`);
 
-    // Real client-side polygon crop: load source, clip to polygon, gray-fill
-    // outside (matches the backend's PIL behavior — keeps mock/real visually
-    // identical), then crop to the polygon's bounding box. The polygon is in
-    // image-pixel coords relative to the source's naturalWidth/Height.
     const dataUrl = await drawMockLassoCrop(sourceUrl, polygon);
     const croppedId = registerUrl(dataUrl, "lasso");
 
-    // Lasso ROI uses a smaller, dynamic dimension set. Until the VLM is wired
-    // we mock Subject + Texture + Composition as the placeholder set.
-    const lassoDims: Dimension[] = ["Subject", "Texture", "Composition"];
-    const tags: Partial<Record<Dimension, string[]>> = {};
-    for (const d of lassoDims) {
-      tags[d] = tagsFor(`${assetId}:lasso:${polygon.length}`, d);
-    }
-    return {
-      cropped_asset_id: croppedId,
-      tags: tags as Record<Dimension, string[]>,
-    };
+    // Lasso has already isolated the region — collapse anchors to center.
+    const tags = tagsFor(`${assetId}:lasso:${polygon.length}`).map((t) =>
+      t.scope === "local" ? { ...t, anchor: [0.5, 0.5] as [number, number] } : t,
+    );
+    return { cropped_asset_id: croppedId, tags };
   },
 
   async uploadAsset(file: File): Promise<UploadedAsset> {
-    // mock: turn the File into an object URL we can render straight from
-    // memory — no backend round-trip, no AssetStore on the mock side beyond
-    // the URL map.
     const url = URL.createObjectURL(file);
     const id = registerUrl(url, "upload");
     return {
@@ -431,9 +374,6 @@ export const mockApi = {
     const ids: string[] = [];
     const results: ComposedAsset[] = [];
 
-    // Snapshot the fusion stack into the shape stored on composed assets.
-    // The backend protocol's Concept.tags is a list, but in the new per-tag
-    // model each concept carries exactly one tag — snapshot it as-is.
     const fusionSnapshot: CuratedConceptSnapshot[] = [];
     const sourceIds = new Set<string>();
     for (const g of stack.groups) {
@@ -458,9 +398,9 @@ export const mockApi = {
         url: dataUrl,
         origin: "composed",
         createdAt: Date.now(),
-        label: "", // store assigns
-        prompt: "", // store backfills
-        galleryEntryId: "", // store backfills
+        label: "",
+        prompt: "",
+        galleryEntryId: "",
         variantIdx: i,
         numSamples: n,
         seed: stack.seed,
@@ -478,7 +418,7 @@ export const mockApi = {
     };
   },
 
-  // ─── users + personas (Phase 8 mock) ─────────────────────────────────────
+  // ─── users + personas (unchanged) ────────────────────────────────────────
 
   async listUsers(): Promise<User[]> {
     return [...mockUsers];
