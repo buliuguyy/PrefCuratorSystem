@@ -90,12 +90,19 @@ const realApi = {
   generateCandidates: async (
     prompt: string,
     n: number = 4,
+    personaCtx?: { userId: string; personaId: string },
   ): Promise<{ candidates: (AssetRef | GeneratedAsset)[] }> => {
     const res = await jsonFetch<{ candidates: RawCandidate[] }>(
       "/api/candidates",
       {
         method: "POST",
-        body: JSON.stringify({ prompt, n }),
+        body: JSON.stringify({
+          prompt,
+          n,
+          ...(personaCtx
+            ? { user_id: personaCtx.userId, persona_id: personaCtx.personaId }
+            : {}),
+        }),
       },
     );
     // Backfill the full GeneratedAsset shape so the store doesn't have to
@@ -117,8 +124,14 @@ const realApi = {
     prompt: string,
     n: number,
     onCandidate: (a: GeneratedAsset) => void,
+    personaCtx?: { userId: string; personaId: string },
   ): Promise<void> => {
-    await streamNdjson("/api/candidates/stream", { prompt, n }, (line) => {
+    const body: Record<string, unknown> = { prompt, n };
+    if (personaCtx) {
+      body.user_id = personaCtx.userId;
+      body.persona_id = personaCtx.personaId;
+    }
+    await streamNdjson("/api/candidates/stream", body, (line) => {
       if (line.type !== "candidate") return;
       const c = line as unknown as RawCandidate;
       onCandidate({

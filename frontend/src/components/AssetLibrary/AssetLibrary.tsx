@@ -4,6 +4,10 @@ import { useMemo, useState } from "react";
 
 import { useCurator } from "@/store/useCurator";
 import type { Asset, AssetOrigin } from "@/types";
+import {
+  FinalBadge,
+  finalContainerClass,
+} from "@/components/FinalBadge/FinalBadge";
 
 import styles from "./AssetLibrary.module.css";
 
@@ -98,7 +102,7 @@ export function AssetLibrary() {
           return (
             <button
               key={a.id}
-              className={`${styles.cell} ${isFinal ? styles.cellFinal : ""}`}
+              className={`${styles.cell} ${isFinal ? finalContainerClass : ""}`}
               onClick={() => setPreview(a.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -115,7 +119,7 @@ export function AssetLibrary() {
                 {a.origin === "composed" ? "✦" : a.origin === "lasso" ? "✂" : a.origin === "uploaded" ? "↑" : ""}
                 {a.label}
               </span>
-              {isFinal && <span className={styles.finalBadge}>FINAL</span>}
+              {isFinal && <FinalBadge />}
             </button>
           );
         })}

@@ -16,24 +16,21 @@ function timeAgo(ts: number): string {
   return `${h}h ago`;
 }
 
-/** Right-sidebar panel: top half = Version History (the chronological log
- *  of compose runs in this session); bottom half = Final Composition
- *  (the user's pinned winner). */
+/** Curator Panel: chronological Version History of every compose run in
+ *  this session. Phase 10 removed the dedicated Final Composition slot —
+ *  the FINAL marker now lives purely as a yellow badge on the pinned
+ *  tile / cell wherever it appears (Canvas, Asset Library). */
 export function CuratorPanel() {
   const gallery = useCurator((s) => s.gallery);
   const activeId = useCurator((s) => s.activeGalleryId);
   const loadEntry = useCurator((s) => s.loadGalleryEntry);
   const removeEntry = useCurator((s) => s.removeGalleryEntry);
   const assets = useCurator((s) => s.assets);
-  const finalAssetId = useCurator((s) => s.finalAssetId);
   const setFinalAsset = useCurator((s) => s.setFinalAsset);
-  const setPreview = useCurator((s) => s.setPreview);
 
   const [ctx, setCtx] = useState<
     { kind: "gallery" | "asset"; id: string; x: number; y: number } | null
   >(null);
-
-  const finalAsset = finalAssetId ? assets[finalAssetId] : null;
 
   return (
     <aside className={styles.panel}>
@@ -118,47 +115,6 @@ export function CuratorPanel() {
               </div>
             );
           })}
-        </div>
-      </section>
-
-      <section className={styles.finalSection}>
-        <header className={styles.finalHead}>
-          <div className={styles.title}>Final Composition</div>
-          {finalAsset ? (
-            <button
-              className={styles.unpinBtn}
-              onClick={() => setFinalAsset(null)}
-              title="Unpin"
-            >
-              unpin
-            </button>
-          ) : (
-            <div className={styles.subtitle}>
-              right-click any tile to pin
-            </div>
-          )}
-        </header>
-        <div className={styles.finalBody}>
-          {finalAsset ? (
-            <button
-              className={styles.finalImgWrap}
-              onClick={() => setPreview(finalAsset.id)}
-              title="Click to preview at full size"
-            >
-              <img
-                src={finalAsset.url}
-                alt={finalAsset.label}
-                className={styles.finalImg}
-              />
-              <span className={styles.finalLabel}>{finalAsset.label}</span>
-            </button>
-          ) : (
-            <div className={styles.finalEmpty}>
-              Pin one image as your design's final answer. Survives the
-              session — right-click any tile or gallery entry and pick
-              <em> Pin as final</em>.
-            </div>
-          )}
         </div>
       </section>
 

@@ -34,7 +34,11 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from app.services import gemini_image_client, prompt_expander_client
+from app.services import (
+    gemini_image_client,
+    persona_summary_client,
+    prompt_expander_client,
+)
 from app.storage import store
 
 log = logging.getLogger(__name__)
@@ -144,14 +148,56 @@ async def _gen_one(idx: int, variant_prompt: str) -> CandidateOut:
     return CandidateOut(asset_id=asset.id, prompt=variant_prompt, generator=generator)
 
 
-async def generate_candidates(prompt: str, n: int = 4) -> list[CandidateOut]:
+async def _resolve_persona_summary(
+    user_id: str | None,
+    persona_id: str | None,
+    recent_prompt: str,
+) -> str | None:
+    """Look up (or derive + cache) the preference summary for an active
+    persona. Returns None silently on any miss so the caller can fall back
+    to unbiased expansion."""
+    if not user_id or not persona_id:
+        return None
+    # Local import keeps this module decoupled from persona storage at import
+    # time (so the smoke tests don't have to spin up the storage dir).
+    from app.persona_store import personas as persona_store
+
+    persona = persona_store.get(user_id, persona_id)
+    if persona is None:
+        log.info("image_gen: persona %s not found — unbiased expansion", persona_id)
+        return None
+    if persona.prompt_summary:
+        return persona.prompt_summary
+    if not persona.concepts:
+        return None
+    concept_payload = [
+        {"sign": c.sign, "dimension": c.dimension, "tag": c.tag}
+        for c in persona.concepts
+    ]
+    summary = await persona_summary_client.derive_summary(
+        concepts=concept_payload, recent_prompt=recent_prompt,
+    )
+    if summary:
+        persona_store.set_prompt_summary(user_id, persona_id, summary)
+    return summary
+
+
+async def generate_candidates(
+    prompt: str,
+    n: int = 4,
+    user_id: str | None = None,
+    persona_id: str | None = None,
+) -> list[CandidateOut]:
     """Generate exactly `n` candidate images via prompt-expand → fan-out Gemini.
 
     One image per variant prompt. Slot i in the returned list corresponds to
     variant i — the order is preserved so frontend tile order matches the
     prompt ordering produced by the expander."""
     n = max(1, min(n, 4))
-    variants = await prompt_expander_client.expand(prompt, n)
+    persona_summary = await _resolve_persona_summary(user_id, persona_id, prompt)
+    variants = await prompt_expander_client.expand(
+        prompt, n, persona_summary=persona_summary,
+    )
     # Pad / trim defensively (expander guarantees this but it's cheap insurance).
     while len(variants) < n:
         variants.append(prompt)
@@ -168,7 +214,12 @@ async def generate_candidates(prompt: str, n: int = 4) -> list[CandidateOut]:
     return list(results)
 
 
-async def generate_candidates_stream(prompt: str, n: int = 4):
+async def generate_candidates_stream(
+    prompt: str,
+    n: int = 4,
+    user_id: str | None = None,
+    persona_id: str | None = None,
+):
     """Async generator variant of generate_candidates. Yields (idx, CandidateOut)
     pairs in the order each Gemini call FINISHES (not the variant order), so
     the frontend can render images on the canvas as they land instead of
@@ -177,7 +228,10 @@ async def generate_candidates_stream(prompt: str, n: int = 4):
     Total still equals `n`. Each fallback failure is yielded individually so
     one slow Gemini call doesn't block earlier successes."""
     n = max(1, min(n, 4))
-    variants = await prompt_expander_client.expand(prompt, n)
+    persona_summary = await _resolve_persona_summary(user_id, persona_id, prompt)
+    variants = await prompt_expander_client.expand(
+        prompt, n, persona_summary=persona_summary,
+    )
     while len(variants) < n:
         variants.append(prompt)
     variants = variants[:n]

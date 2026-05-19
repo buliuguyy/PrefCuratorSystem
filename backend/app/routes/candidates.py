@@ -11,7 +11,12 @@ router = APIRouter(prefix="/api/candidates", tags=["candidates"])
 
 @router.post("", response_model=CandidateResponse)
 async def create_candidates(req: CandidateRequest) -> CandidateResponse:
-    cands = await image_gen_client.generate_candidates(prompt=req.prompt, n=req.n)
+    cands = await image_gen_client.generate_candidates(
+        prompt=req.prompt,
+        n=req.n,
+        user_id=req.user_id,
+        persona_id=req.persona_id,
+    )
     return CandidateResponse(
         candidates=[
             CandidateAsset(
@@ -33,7 +38,10 @@ async def create_candidates_stream(req: CandidateRequest) -> StreamingResponse:
     async def gen():
         total = 0
         async for idx, c in image_gen_client.generate_candidates_stream(
-            prompt=req.prompt, n=req.n,
+            prompt=req.prompt,
+            n=req.n,
+            user_id=req.user_id,
+            persona_id=req.persona_id,
         ):
             total += 1
             yield (

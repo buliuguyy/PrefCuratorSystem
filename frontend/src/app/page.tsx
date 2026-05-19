@@ -20,14 +20,14 @@ export default function Home() {
       <Topbar />
       <main className={styles.main}>
         <aside className={styles.leftSidebar}>
-          <PersonaPanel />
           <AssetLibrary />
+          <CuratorPanel />
+          <PersonaPanel />
         </aside>
         <section className={styles.canvas}>
           {view === "refiner" ? <Refiner /> : <Canvas />}
         </section>
         <FusionStackPreview />
-        <CuratorPanel />
       </main>
       <PreviewOverlay />
     </div>

@@ -555,14 +555,27 @@ export const useCurator = create<CuratorState>((set, get) => ({
         }, delay);
       };
 
+      // Phase 10: forward the active-persona context so the backend
+      // prompt-expander can lean variants toward this user's known
+      // preferences. Detached / no-user sessions stay unbiased.
+      const userId = state.currentUserId;
+      const personaId = state.activePersonaId;
+      const personaCtx =
+        userId && personaId ? { userId, personaId } : undefined;
+
       const stream = api.streamCandidates;
       if (typeof stream === "function") {
-        await stream(prompt, 4, (c) => {
-          get().registerAssets([c]);
-          firePreTag(c.id);
-        });
+        await stream(
+          prompt,
+          4,
+          (c) => {
+            get().registerAssets([c]);
+            firePreTag(c.id);
+          },
+          personaCtx,
+        );
       } else {
-        const res = await api.generateCandidates(prompt, 4);
+        const res = await api.generateCandidates(prompt, 4, personaCtx);
         const candidates = res.candidates as GeneratedAsset[];
         state.registerAssets(candidates);
         for (const c of candidates) firePreTag(c.id);

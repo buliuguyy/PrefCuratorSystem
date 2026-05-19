@@ -8,6 +8,10 @@ import { CanvasTagOverlay } from "@/components/CanvasTagOverlay/CanvasTagOverlay
 import { SmartTagPopover } from "@/components/SmartTagPopover/SmartTagPopover";
 import { LassoOverlay } from "@/components/LassoOverlay/LassoOverlay";
 import { PolygonOverlay } from "@/components/LassoOverlay/PolygonOverlay";
+import {
+  FinalBadge,
+  finalContainerClass,
+} from "@/components/FinalBadge/FinalBadge";
 import type { Asset, CanvasItem } from "@/types";
 
 import styles from "./Canvas.module.css";
@@ -449,6 +453,7 @@ export function Canvas() {
                 item={it}
                 asset={asset}
                 selected={selectedAssetIds.includes(it.assetId)}
+                isFinal={asset.id === finalAssetId}
                 onPointerDown={(e) => onTilePointerDown(e, it)}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
@@ -691,6 +696,7 @@ interface TileProps {
   item: CanvasItem;
   asset: Asset;
   selected: boolean;
+  isFinal: boolean;
   onPointerDown(e: React.PointerEvent<HTMLButtonElement>): void;
   onPointerMove(e: React.PointerEvent): void;
   onPointerUp(e: React.PointerEvent): void;
@@ -702,6 +708,7 @@ function Tile({
   item,
   asset,
   selected,
+  isFinal,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -716,6 +723,9 @@ function Tile({
         styles.tile,
         composed ? styles.tileComposed : "",
         selected ? styles.tileSelected : "",
+        // selection wins over final for outline emphasis (selection means
+        // the user is actively manipulating); final wins otherwise.
+        !selected && isFinal ? finalContainerClass : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -746,6 +756,7 @@ function Tile({
         {asset.label}
       </span>
       {selected && <span className={styles.selectMark}>✓</span>}
+      {isFinal && <FinalBadge />}
     </button>
   );
 }

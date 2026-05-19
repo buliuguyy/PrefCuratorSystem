@@ -211,6 +211,11 @@ class Persona:
     # Soft metadata to round-trip what would otherwise need a separate UI:
     prompt: str = ""
     seed: int = 420
+    # Phase 10: short natural-language summary of the user's preferences
+    # derived from concepts + recent prompt. Cached so we don't re-derive on
+    # every Generate; reset to None whenever the persona content changes (see
+    # snapshot_from_payload).
+    prompt_summary: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -224,6 +229,7 @@ class Persona:
             "assets": [asdict(a) for a in self.assets],
             "prompt": self.prompt,
             "seed": self.seed,
+            "prompt_summary": self.prompt_summary,
         }
 
     def to_summary(self) -> dict[str, Any]:
@@ -300,6 +306,7 @@ class PersonaStore:
             last_used_at=raw.get("last_used_at", raw["updated_at"]),
             prompt=raw.get("prompt", ""),
             seed=raw.get("seed", 420),
+            prompt_summary=raw.get("prompt_summary"),
             concepts=[PersonaConcept(**c) for c in raw.get("concepts", [])],
             assets=[
                 PersonaAssetSnapshot(
@@ -406,6 +413,18 @@ class PersonaStore:
             prompt=prompt,
             seed=int(seed),
         )
+
+    def set_prompt_summary(self, user_id: str, persona_id: str, summary: str) -> None:
+        """Persist a freshly-derived natural-language preference summary
+        onto a persona record. Used by the prompt expander to avoid
+        re-deriving the same summary on every Generate. No-op if the persona
+        was deleted between the derive call and now."""
+        with self._lock:
+            existing = self.get(user_id, persona_id)
+            if existing is None:
+                return
+            existing.prompt_summary = summary.strip() or None
+            self._save_file(existing)
 
     def hydrate_into_asset_store(self, persona: Persona) -> list[str]:
         """Re-load this persona's asset bytes into the in-memory AssetStore

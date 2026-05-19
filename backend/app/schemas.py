@@ -59,6 +59,12 @@ class FusionStack(BaseModel):
 class CandidateRequest(BaseModel):
     prompt: str
     n: int = 4
+    # Phase 10: when an active persona is set on the frontend, both ids are
+    # forwarded so the prompt expander can bias variants toward the user's
+    # known preferences. Optional — unauthenticated / unattached calls work
+    # exactly like before.
+    user_id: str | None = None
+    persona_id: str | None = None
 
 
 class AssetRef(BaseModel):

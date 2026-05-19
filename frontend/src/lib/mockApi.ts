@@ -275,6 +275,8 @@ export const mockApi = {
   async generateCandidates(
     prompt: string,
     n: number = 4,
+    // mock ignores persona bias — kept for signature parity with real api
+    _personaCtx?: { userId: string; personaId: string },
   ): Promise<{ candidates: (AssetRef | GeneratedAsset)[] }> {
     await new Promise((r) => setTimeout(r, 350));
     const k = Math.max(1, Math.min(n, CANDIDATE_URLS.length));
@@ -299,6 +301,7 @@ export const mockApi = {
     prompt: string,
     n: number,
     onCandidate: (a: GeneratedAsset) => void,
+    _personaCtx?: { userId: string; personaId: string },
   ): Promise<void> {
     const k = Math.max(1, Math.min(n, CANDIDATE_URLS.length));
     for (let i = 0; i < k; i++) {

@@ -323,91 +323,50 @@ the side-panel popover with anchored floating pills on each tile.
   updated to assert the new ConceptTag list shape and the lasso
   anchor-collapse rule.
 
-### Phase 10 — Curator UX refinements (planned)
-*Six independent tracks queued after Phase 9. Pick up in any order;
-each item is small enough to commit on its own.*
+### ✅ Phase 10 — Curator UX refinements
 
-1. **Intensity slider range 0.0 – 2.0** (`IntensityMixer.tsx`)
-   - Slider `min=0 max=2 step=0.05`, default still 1.0 — gives the
-     designer room to OVER-amplify a concept, not just attenuate.
-     Render a visible tick / accent at 1.0 so the neutral position is
-     obvious.
-   - Backend `Concept.alpha` already accepts arbitrary floats; the
-     IP-Composer signed-projection math (`α · P_c · e_c`) is linear in
-     α, so α > 1 just scales the swap weight. Spot-check at α=1.5 and
-     α=2.0 for visible saturation / drift before shipping. Note in the
-     slider tooltip that >1 is "exploratory".
-   - `composedAlphas` dirty-check logic stays as-is (float compare).
+Six independent tracks bundled into one phase. Each landed as a small
+self-contained edit:
 
-2. **Persona-driven initial-image prompts**
-   - Today's purpose for `Idiosyncratic Preferences`: capture the
-     designer's selected images + tag history. New purpose: that
-     history should also bias the prompt-expander when the designer
-     hits Generate, so subsequent initial candidates already lean
-     toward the designer's known preferences.
-   - New backend helper `persona_to_prompt_summary`: given a persona's
-     `concepts[]` + asset thumbnails, ask an LLM for a one-line summary
-     ("user tends to prefer warm lighting, painterly textures, no pixel
-     art"). Cache the summary on the persona record (mirror to disk)
-     and invalidate on persona update so we don't re-derive on every
-     Generate.
-   - Wire into `prompt_expander_client`: when the request carries an
-     active persona id, fetch the summary and inject it into the
-     expander's system prompt as a "User preference bias: …" hint.
-   - Open Q: bias ALL 4 variants, or split 2 biased / 2 free? Default
-     all 4 — user can Detach the active persona to get unbiased
-     generation.
-   - Frontend: include `persona_id` on `POST /api/candidates` +
-     `/api/candidates/stream` when an active persona is set.
-
-3. **Drop the Final Composition panel — keep only the FINAL badge**
-   - Remove `CuratorPanel`'s bottom-half "Final Composition" slot.
-   - Keep the `finalAssetId` store field + "Pin as final" / "Unpin
-     from final" right-click entries.
-   - Asset Library already renders a yellow border + `FINAL` corner
-     label on the pinned cell; mirror that on the matching Canvas tile.
-     Factor the badge styles into a shared util so the two surfaces
-     stay in lockstep.
-   - Defer the larger "what does FINAL DO" question — for now the
-     badge is purely a visual marker. Revisit when a real downstream
-     consumer appears (export, share, persona-as-export-target, etc.).
-
-4. **Asset Library overflow fix**
-   - With 30+ assets, thumbnails currently overlap (rows escape the
-     panel's visible area). Suspect: the panel's flex parent isn't
-     bounded, so `overflow-y: auto` on the inner grid has nothing to
-     clip against.
-   - Fix: ensure the column ancestor uses `display: flex;
-     flex-direction: column; min-height: 0` and the AssetLibrary's
-     scroll region gets `flex: 1; min-height: 0; overflow-y: auto`.
-   - Verify at multiple viewport heights — the issue may also surface
-     after the Phase-10 panel reorder below.
-
-5. **Relayout: stack the left column as Asset Library → Curator Panel →
-   Persona Panel**
-   - Move `CuratorPanel` from the right column into the left column,
-     sandwiched between `AssetLibrary` (top) and `PersonaPanel`
-     (bottom).
-   - Right column now contains only `FusionStackPreview`. Top-level
-     grid in `page.tsx` updates: either tighten to 3 columns
-     (left / center / right) or keep 4 with the existing widths.
-   - `CuratorPanel` shrinks to just the Version History half (per
-     item 3), so it fits comfortably in the left column. The component
-     itself loses the Final Composition sub-component.
-
-6. **(Implicit cleanup)** Update the naming map at the bottom of this
-   doc to reflect the panel relocation + Final-Composition removal.
-   No new entries — just edit the existing two rows.
-
-**Out-of-scope for Phase 10** (parked so we don't scope-creep):
-- Mixer Group lock semantics (still in deferred Phase 5).
-- Persona import / export.
-- Persona schema versioning.
-- Defining what FINAL "does" beyond being a visual marker.
+- **10.1 Intensity slider 0.0–2.0** — `IntensityMixer.tsx` slider is
+  now `min=0 max=2 step=0.05`, default still 1.0. A vertical tick at
+  50% marks the neutral position; the numeric readout flips to orange
+  when α > 1 so the designer knows they're in the "exploratory"
+  over-amplified zone. Track gradient was rescaled (fill = α / 2)
+  so the visual fill still matches the slider thumb position.
+- **10.2 Persona-driven initial-image prompts** — added
+  `backend/app/services/persona_summary_client.py` which asks the
+  prompt-expander model for a one-sentence summary of the user's
+  curated concepts ("Prefers soft painterly aesthetics with warm
+  golden-hour lighting…"). Summary is cached on the persona JSON
+  (`prompt_summary` field, reset to `None` on every snapshot save so
+  the next Generate refreshes it). `prompt_expander_client.expand()`
+  takes an optional `persona_summary` and appends a "User preference
+  bias" section to its system prompt. `CandidateRequest` gained
+  `user_id` + `persona_id` (both optional); the frontend forwards them
+  when `activePersonaId` is set, otherwise generation stays unbiased.
+- **10.3 Final Composition slot dropped** — `CuratorPanel` now hosts
+  only the Version History. The `finalAssetId` store field +
+  Pin/Unpin context-menu entries stay, but the marker is purely a
+  visual FINAL badge. New shared `components/FinalBadge/` factors out
+  the yellow corner badge + container border so the Canvas tile and
+  Asset Library cell render identically. Stale CSS rules
+  (`.finalSection`, `.finalImgWrap`, `.cellFinal`, …) were removed.
+- **10.4 Asset Library overflow fix** — every flex column that has a
+  scrolling child (`AssetLibrary.grid`, `PersonaPanel.list`,
+  `CuratorPanel.list`) now sets `flex: 1 1 0; min-height: 0;
+  overflow-y: auto`. Without `min-height: 0` a flex item's intrinsic
+  content height wins and the inner `overflow-y: auto` has nothing to
+  clip against — that was the 30+ asset spillover.
+- **10.5 Relayout to 3-column** — left sidebar stacks
+  `AssetLibrary → CuratorPanel → PersonaPanel`. Right column is just
+  `FusionStackPreview`. `CuratorPanel.panel` lost its fixed width +
+  `border-left` and inherits the left-sidebar width instead. Sidebar
+  bumped from 260px → 280px to give the three stacked panels room.
+- **10.6 Naming map updated** — see bottom of this doc.
 
 ### Phase 11 (tentative) — productionization wrap-up
-*(Was "Phase 9 (tentative)" before Phases 9 + 10 landed. Sketch only;
-nail down after Phase 10.)*
+*Sketch only; nail down after Phase 10 has bake-time.*
 - Replace in-memory `AssetStore` with disk-backed cache (so a server
   restart doesn't kill the active canvas).
 - Persona schema versioning + migration path (see open Q below).
@@ -449,13 +408,20 @@ nail down after Phase 10.)*
 
 ## Naming map (screenshot terminology → code)
 
-- "Idiosyncratic Preferences" → left-sidebar `PersonaPanel` (Phase 8 ✅)
-- "Asset Library" → left sidebar, beneath `PersonaPanel` (Phase 8 ✅)
+- "Asset Library" → left sidebar, **top** of the column (Phase 8 ✅,
+  relocated Phase 10)
+- "The Curator Panel" with "Version History" → left sidebar, **middle**
+  of the column (Phase 8 ✅, moved left + slimmed to Version History only
+  in Phase 10)
+- "Idiosyncratic Preferences" → left sidebar, **bottom** of the column
+  (`PersonaPanel`, Phase 8 ✅, relocated Phase 10)
 - "Smart Tagging" → floating pills via `CanvasTagOverlay` (Phase 9) + fallback list `SmartTagPopover` (Phase 2, demoted in Phase 9)
-- "Feature Fusion Stack" / "Curator Tiles" → `FusionStackPreview` (Phase 2,
-  promoted to `FeatureFusionStack` panel in Phase 3 with the
+- "Feature Fusion Stack" / "Curator Tiles" → `FusionStackPreview`
+  (Phase 2, sole resident of the right column post-Phase 10, with the
   "Result image = A_features + D_Lasso − B_style" formula header)
 - "Feature Intensity Mixer" → `IntensityMixer` (Phase 3 mocked / Phase 5
-  real)
-- "The Curator Panel" with "Version History" / "Final Composition" → `CuratorPanel` (Phase 8 ✅)
+  real / Phase 10 widened range 0–2)
+- "Final Composition" → no longer a panel — purely a yellow `FINAL`
+  corner badge rendered by `components/FinalBadge/` on the pinned tile
+  (Canvas) and pinned cell (Asset Library) (Phase 10 ✅)
 - "Save as Persona" / "Update Persona" → top of `PersonaPanel` + per-card buttons (Phase 8 ✅)

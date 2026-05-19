@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { api } from "@/lib/api";
 import { useCurator } from "@/store/useCurator";
@@ -24,15 +24,11 @@ export function PersonaPanel() {
   const personaError = useCurator((s) => s.personaError);
   const activePersonaId = useCurator((s) => s.activePersonaId);
   const stack = useCurator((s) => s.stack);
-  const saveCurrentAsPersona = useCurator((s) => s.saveCurrentAsPersona);
   const updatePersonaFromCurrent = useCurator((s) => s.updatePersonaFromCurrent);
   const applyPersona = useCurator((s) => s.applyPersona);
   const deletePersona = useCurator((s) => s.deletePersona);
   const detachActivePersona = useCurator((s) => s.detachActivePersona);
   const refreshPersonas = useCurator((s) => s.refreshPersonas);
-
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
 
   // Reload on user switch (the store does this but this is a defensive
   // re-fire in case the panel mounted after the user was already set).
@@ -56,16 +52,6 @@ export function PersonaPanel() {
   }
 
   const currentUser = users.find((u) => u.id === currentUserId);
-
-  async function submitNew() {
-    const nm = newName.trim();
-    if (!nm) return;
-    const created = await saveCurrentAsPersona(nm);
-    if (created) {
-      setNewName("");
-      setCreating(false);
-    }
-  }
 
   const canSave = stack.length > 0;
 
@@ -114,53 +100,11 @@ export function PersonaPanel() {
 
       {personaError && <div className={styles.error}>{personaError}</div>}
 
-      {creating ? (
-        <div className={styles.newRow}>
-          <input
-            className={styles.newInput}
-            placeholder="persona name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void submitNew();
-              if (e.key === "Escape") {
-                setCreating(false);
-                setNewName("");
-              }
-            }}
-            maxLength={60}
-            autoFocus
-          />
-          <button
-            className={styles.newOk}
-            disabled={!newName.trim() || !canSave}
-            onClick={submitNew}
-          >
-            Save
-          </button>
-          <button
-            className={styles.newCancel}
-            onClick={() => {
-              setCreating(false);
-              setNewName("");
-            }}
-          >
-            ✕
-          </button>
+      {!canSave && personas.length === 0 && (
+        <div className={styles.hint}>
+          Saving a persona lives next to <em>Recompose</em> in the Intensity
+          Mixer — compose at least once, then save the resulting stack.
         </div>
-      ) : (
-        <button
-          className={styles.saveBtn}
-          disabled={!canSave}
-          onClick={() => setCreating(true)}
-          title={
-            canSave
-              ? "Snapshot the current stack as a new persona"
-              : "Pick at least one tag to save a persona"
-          }
-        >
-          + Save current as persona
-        </button>
       )}
 
       <div className={styles.list}>

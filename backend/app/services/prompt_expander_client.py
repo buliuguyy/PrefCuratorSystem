@@ -127,9 +127,18 @@ def _extract_message_content(body: dict) -> Optional[str]:
     return None
 
 
-async def expand(prompt: str, n: int = 4) -> list[str]:
+async def expand(
+    prompt: str,
+    n: int = 4,
+    persona_summary: Optional[str] = None,
+) -> list[str]:
     """Return `n` variant prompts for `prompt`. Falls back to `[prompt]*n` on
-    any failure so callers never have to handle the error case."""
+    any failure so callers never have to handle the error case.
+
+    When ``persona_summary`` is provided, the expander's system prompt is
+    extended with a "User preference bias: …" hint so all variants lean
+    toward the designer's known aesthetic preferences. The user can detach
+    the active persona to get unbiased expansion."""
     n = max(1, min(n, 8))
     user_prompt = prompt.strip()
     if not user_prompt:
@@ -148,10 +157,24 @@ async def expand(prompt: str, n: int = 4) -> list[str]:
     if not (api_base.endswith("/v1") or "/v1/" in api_base):
         api_base = api_base + "/v1"
     url = f"{api_base}/chat/completions"
+
+    system_prompt = SYSTEM_PROMPT
+    if persona_summary and persona_summary.strip():
+        bias = persona_summary.strip()
+        system_prompt = (
+            f"{SYSTEM_PROMPT}\n\n"
+            f"# User preference bias\n"
+            f"All variants should lean toward this designer's stated preferences:\n"
+            f"  {bias}\n"
+            f"Honor the divergence rules above, but bias every variant's free "
+            f"dimensions toward this taste."
+        )
+        log.info("prompt_expander: applying persona bias: %s", bias[:120])
+
     payload = {
         "model": settings.prompt_expander_model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Original prompt: {user_prompt}\nN: {n}"},
         ],
     }
